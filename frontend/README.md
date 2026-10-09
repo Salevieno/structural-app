@@ -12,7 +12,7 @@ Uma única aplicação desktop, com tecnologias diferentes em camadas:
 O front-end pode ser desenvolvido primeiro com serviços simulados, mantendo a futura integração isolada.
 
 ## 2. Organização sugerida do front-end
-
+```
 frontend/
 ├── src/
 │   ├── app.css
@@ -46,7 +46,7 @@ frontend/
 │       └── utils/
 ├── package.json
 └── vite.config.ts
-
+```
 A estrutura é uma orientação, não uma exigência de criar todos os diretórios vazios agora. Criar arquivos quando houver uma etapa que os utilize.
 
 ## 3. Responsabilidades
