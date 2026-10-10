@@ -13,6 +13,7 @@
     StructuralSection,
     SupportConstraints,
   } from './lib/domain/model';
+  import { validateModelReadiness } from './lib/domain/modelReadiness';
   import SceneViewport from './lib/viewport/SceneViewport.svelte';
   import type { CameraView } from './lib/viewport/types';
   import type { Position3D, WorkPlane } from './lib/viewport/workPlane';
@@ -120,6 +121,14 @@
   let nodalLoadDraft: LoadDraft = { Fx: '0', Fy: '0', Fz: '0', Mx: '0', My: '0', Mz: '0' };
   let displacementDraft: DisplacementDraft = { ux: '0', uy: '0', uz: '0', tx: '0', ty: '0', tz: '0' };
   let supportDraft: SupportConstraints = { ux: false, uy: false, uz: false, tx: false, ty: false, tz: false };
+  let analysisReadiness = validateModelReadiness({
+    nodes,
+    elements,
+    materials,
+    sections,
+    supports: nodalSupports,
+    hasMesh: false,
+  });
 
   $: selectedNode = nodes.find((node) => node.id === selectedNodeId);
   $: selectedElement = elements.find((element) => element.id === selectedElementId);
@@ -128,6 +137,14 @@
   $: selectedNodalLoad = nodalLoads.find((load) => load.nodeId === selectedNodeId);
   $: selectedPrescribedDisplacement = prescribedDisplacements.find((item) => item.nodeId === selectedNodeId);
   $: selectedNodalSupport = nodalSupports.find((item) => item.nodeId === selectedNodeId);
+  $: analysisReadiness = validateModelReadiness({
+    nodes,
+    elements,
+    materials,
+    sections,
+    supports: nodalSupports,
+    hasMesh: false,
+  });
 
   const emptyLoadDraft = (): LoadDraft => ({ Fx: '0', Fy: '0', Fz: '0', Mx: '0', My: '0', Mz: '0' });
   const emptyDisplacementDraft = (): DisplacementDraft => ({
@@ -720,7 +737,14 @@
     <nav class="toolbar" aria-label="Ações gerais">
       <button type="button">Arquivo</button>
       <button type="button">Editar</button>
-      <button type="button">Analisar</button>
+      <button
+        type="button"
+        disabled={!analysisReadiness.ready}
+        aria-describedby="analysis-readiness-status analysis-readiness-issues"
+        title={analysisReadiness.ready ? 'Modelo pronto para análise' : 'Consulte os problemas de prontidão do modelo'}
+      >
+        Iniciar análise
+      </button>
       <button type="button">Resultados</button>
     </nav>
   </header>
@@ -832,6 +856,27 @@
     </main>
 
     <aside class="context-panel" aria-label="Painel lateral do modelo">
+      <section aria-labelledby="analysis-readiness-heading">
+        <h2 id="analysis-readiness-heading">Prontidão para análise</h2>
+        <p
+          id="analysis-readiness-status"
+          class:readiness-ready={analysisReadiness.ready}
+          class:readiness-blocked={!analysisReadiness.ready}
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          {analysisReadiness.ready ? 'Modelo pronto para análise.' : `${analysisReadiness.issues.length} problema(s) impedem a análise.`}
+        </p>
+        <ul id="analysis-readiness-issues" class="readiness-issues">
+          {#each analysisReadiness.issues as issue (issue.code + issue.message)}
+            <li>{issue.message}</li>
+          {/each}
+          {#if analysisReadiness.ready}
+            <li>Todos os requisitos mínimos de completude foram atendidos.</li>
+          {/if}
+        </ul>
+      </section>
       <section>
         <h2>Modelo</h2>
         <p class="model-count">{nodes.length} {nodes.length === 1 ? 'nó' : 'nós'}</p>
@@ -1234,6 +1279,13 @@
     background: #111827;
   }
 
+  .toolbar button:disabled {
+    border-color: #334155;
+    color: #64748b;
+    cursor: not-allowed;
+    opacity: 0.7;
+  }
+
   .workspace {
     display: grid;
     grid-template-columns: 220px minmax(0, 1fr) 280px;
@@ -1372,6 +1424,38 @@
     margin: 0;
     color: #94a3b8;
     font-size: 0.78rem;
+  }
+
+  .readiness-blocked,
+  .readiness-ready {
+    margin: 0;
+    padding: 0.5rem;
+    border: 1px solid;
+    border-radius: 0.45rem;
+    font-size: 0.76rem;
+    line-height: 1.4;
+  }
+
+  .readiness-blocked {
+    border-color: #92400e;
+    background: rgba(120, 53, 15, 0.2);
+    color: #fcd34d;
+  }
+
+  .readiness-ready {
+    border-color: #166534;
+    background: rgba(20, 83, 45, 0.2);
+    color: #86efac;
+  }
+
+  .readiness-issues {
+    display: grid;
+    gap: 0.35rem;
+    margin: 0;
+    padding-left: 1.1rem;
+    color: #cbd5e1;
+    font-size: 0.75rem;
+    line-height: 1.4;
   }
 
   .node-list {

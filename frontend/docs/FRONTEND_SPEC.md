@@ -54,10 +54,12 @@ Implemente e valide uma etapa antes de começar a próxima. Não gerar toda a ap
 
 ## Etapa 6 — Validação de prontidão
 - Criar validador central de completude.
-- Desabilitar início de análise quando faltarem nós, elementos, apoios, cargas, materiais ou seções exigidos.
+- Exigir nós, elementos e uma malha.
+- Exigir material e seção válidos em todos os elementos.
+- Exigir pelo menos um apoio aplicado a um nó existente.
 - Apresentar todos os problemas encontrados.
 
-**Aceite:** botão habilita/desabilita conforme o modelo e os problemas são explicados; nenhuma análise real é simulada como concluída.
+**Aceite:** botão habilita/desabilita conforme o modelo e os problemas são explicados; nenhuma análise real é simulada como concluída. Cargas não fazem parte da condição de completude definida para esta etapa. Como a geração de malha ainda não está disponível, a análise permanece bloqueada com esse diagnóstico até uma etapa futura implementá-la.
 
 ## Etapa 7 — Contrato de análise e integração Tauri
 - Definir contrato de comandos/eventos com o backend Rust.
