@@ -1,18 +1,27 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import { logger, type LogEntry, type LogLevel } from './lib/logging';
-  import type { StructuralNode } from './lib/domain/model';
+  import type { StructuralElement, StructuralNode } from './lib/domain/model';
   import SceneViewport from './lib/viewport/SceneViewport.svelte';
   import type { CameraView } from './lib/viewport/types';
   import type { Position3D, WorkPlane } from './lib/viewport/workPlane';
 
-  type ToolType = 'select' | 'nodes' | 'elements' | 'materials' | 'sections' | 'loads' | 'supports';
+  type ToolType =
+    | 'select'
+    | 'nodes'
+    | 'elements'
+    | 'mesh'
+    | 'materials'
+    | 'sections'
+    | 'loads'
+    | 'supports';
   type LogFilter = LogLevel | 'all';
 
   const tools: Array<{ id: ToolType; label: string }> = [
     { id: 'select', label: 'Seleção' },
     { id: 'nodes', label: 'Nós' },
     { id: 'elements', label: 'Elementos' },
+    { id: 'mesh', label: 'Malha' },
     { id: 'materials', label: 'Materiais' },
     { id: 'sections', label: 'Seções' },
     { id: 'loads', label: 'Cargas' },
@@ -46,13 +55,23 @@
   let workPlane: WorkPlane = 'XY';
   let cameraView: CameraView = 'isometric';
   let nodes: StructuralNode[] = [];
+  let elements: StructuralElement[] = [];
   let selectedNodeId: string | undefined;
+  let selectedElementId: string | undefined;
+  let connectionNodeIds: string[] = [];
   let modelFeedback = '';
 
   $: selectedNode = nodes.find((node) => node.id === selectedNodeId);
+  $: selectedElement = elements.find((element) => element.id === selectedElementId);
 
   const setTool = (toolId: ToolType): void => {
     activeTool = toolId;
+    if (toolId !== 'elements' && connectionNodeIds.length > 0) {
+      connectionNodeIds = [];
+    }
+    if (toolId === 'mesh') {
+      modelFeedback = 'Geração de malha indisponível: algoritmo, parâmetros e tipos de elementos ainda não foram definidos.';
+    }
     logger.info('model.tool.changed', 'Ferramenta de edição alterada', {
       toolId,
       source: 'toolbar',
@@ -121,6 +140,7 @@
     };
     nodes = [...nodes, node];
     selectedNodeId = node.id;
+    selectedElementId = undefined;
     modelFeedback = `${node.id} criado no plano ${workPlane}.`;
     logger.info('model.node.create.completed', 'Nó criado no modelo provisório', {
       nodeId: node.id,
@@ -129,8 +149,67 @@
     });
   };
 
+  const handleElementNodePick = (nodeId: string): void => {
+    if (connectionNodeIds.includes(nodeId)) {
+      modelFeedback = 'Escolha um segundo nó diferente para completar a conexão.';
+      logger.warn('model.element.create.same_node', 'Conexão exige dois nós distintos', { nodeId });
+      return;
+    }
+
+    if (connectionNodeIds.length === 0) {
+      connectionNodeIds = [nodeId];
+      modelFeedback = `Nó ${nodeId} selecionado. Agora selecione outro nó para criar a conexão.`;
+      logger.info('model.element.create.started', 'Seleção do primeiro nó para conexão iniciada', {
+        nodeId,
+      });
+      return;
+    }
+
+    const startNodeId = connectionNodeIds[0];
+    if (!startNodeId) {
+      connectionNodeIds = [nodeId];
+      return;
+    }
+
+    const duplicate = elements.find(
+      (element) =>
+        (element.nodeIds[0] === startNodeId && element.nodeIds[1] === nodeId) ||
+        (element.nodeIds[0] === nodeId && element.nodeIds[1] === startNodeId),
+    );
+    if (duplicate) {
+      connectionNodeIds = [];
+      selectedNodeId = undefined;
+      selectedElementId = duplicate.id;
+      modelFeedback = `A conexão entre esses nós já existe (${duplicate.id}).`;
+      logger.warn('model.element.create.duplicate', 'Conexão duplicada entre o mesmo par de nós', {
+        elementId: duplicate.id,
+        nodeIds: duplicate.nodeIds,
+      });
+      return;
+    }
+
+    const element: StructuralElement = {
+      id: `element-${crypto.randomUUID()}`,
+      nodeIds: [startNodeId, nodeId],
+    };
+    elements = [...elements, element];
+    connectionNodeIds = [];
+    selectedNodeId = undefined;
+    selectedElementId = element.id;
+    modelFeedback = `Conexão provisória ${element.id} criada entre os dois nós.`;
+    logger.info('model.element.create.completed', 'Conexão visual provisória criada', {
+      elementId: element.id,
+      nodeIds: element.nodeIds,
+      elementCount: elements.length,
+    });
+  };
+
   const handleSelectionChange = (nodeId: string | undefined): void => {
+    if (selectedNodeId === nodeId && selectedElementId === undefined) {
+      return;
+    }
     selectedNodeId = nodeId;
+    selectedElementId = undefined;
     modelFeedback = nodeId ? `${nodeId} selecionado.` : 'Seleção removida.';
     logger.info('model.selection.changed', 'Seleção do modelo alterada', {
       itemType: nodeId ? 'node' : 'none',
@@ -138,11 +217,25 @@
     });
   };
 
-  const selectNodeFromList = (nodeId: string): void => {
-    if (selectedNodeId === nodeId) {
+  const handleElementSelectionChange = (elementId: string | undefined): void => {
+    if (selectedElementId === elementId && selectedNodeId === undefined) {
       return;
     }
+    selectedNodeId = undefined;
+    selectedElementId = elementId;
+    modelFeedback = elementId ? `${elementId} selecionado.` : 'Seleção removida.';
+    logger.info('model.selection.changed', 'Seleção do modelo alterada', {
+      itemType: elementId ? 'element' : 'none',
+      ...(elementId ? { elementId } : {}),
+    });
+  };
+
+  const selectNodeFromList = (nodeId: string): void => {
     handleSelectionChange(nodeId);
+  };
+
+  const selectElementFromList = (elementId: string): void => {
+    handleElementSelectionChange(elementId);
   };
 
   const unsubscribe = logger.subscribe((entry) => {
@@ -251,8 +344,12 @@
       <div class="viewport-help" aria-live="polite">
         {#if activeTool === 'nodes'}
           Clique no plano de trabalho para criar um nó · arrastar orbita · botão direito move · roda amplia
+        {:else if activeTool === 'elements'}
+          Clique em dois nós distintos para criar uma conexão visual provisória · arrastar orbita
         {:else if activeTool === 'select'}
-          Clique em um nó para selecioná-lo · arrastar orbita · botão direito move · roda amplia
+          Clique em um nó ou conexão para selecionar · arrastar orbita · botão direito move · roda amplia
+        {:else if activeTool === 'mesh'}
+          A geração de malha está indisponível até que tipos de elementos e algoritmo sejam definidos
         {:else}
           Esta ferramenta ainda não interage com o viewport nesta etapa · navegação da câmera continua disponível
         {/if}
@@ -264,9 +361,14 @@
         {cameraView}
         {activeTool}
         {nodes}
+        {elements}
         {selectedNodeId}
+        {selectedElementId}
+        {connectionNodeIds}
         onNodeCreate={handleNodeCreate}
+        onElementNodePick={handleElementNodePick}
         onSelectionChange={handleSelectionChange}
+        onElementSelectionChange={handleElementSelectionChange}
         onInteractionNotice={(message) => (modelFeedback = message)}
       />
     </main>
@@ -298,6 +400,50 @@
         {/if}
       </section>
       <section>
+        <h2>Elementos</h2>
+        <p class="model-count">
+          {elements.length} {elements.length === 1 ? 'conexão provisória' : 'conexões provisórias'}
+        </p>
+        {#if elements.length === 0}
+          <div class="empty-state">
+            Nenhuma conectividade. Selecione Elementos e clique em dois nós distintos.
+          </div>
+        {:else}
+          <ul class="node-list" aria-label="Conexões provisórias do modelo">
+            {#each elements as element}
+              <li>
+                <button
+                  type="button"
+                  class:selected-node={element.id === selectedElementId}
+                  aria-pressed={element.id === selectedElementId}
+                  on:click={() => selectElementFromList(element.id)}
+                >
+                  <strong>{element.id}</strong>
+                  <span>{element.nodeIds[0]} ↔ {element.nodeIds[1]}</span>
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </section>
+      <section aria-labelledby="mesh-heading">
+        <h2 id="mesh-heading">Malha</h2>
+        <p class="mesh-notice">
+          Tipos de elementos, algoritmo e parâmetros ainda não foram definidos. Nenhuma malha será gerada.
+        </p>
+        <button
+          type="button"
+          class="mesh-action"
+          disabled
+          aria-describedby="mesh-unavailable-reason"
+        >
+          Gerar malha
+        </button>
+        <span id="mesh-unavailable-reason" class="visually-hidden">
+          A geração de malha está indisponível enquanto algoritmo e parâmetros não forem definidos.
+        </span>
+      </section>
+      <section>
         <h2>Propriedades</h2>
         {#if selectedNode}
           <dl class="node-properties">
@@ -308,8 +454,16 @@
             <div><dt>Z</dt><dd>{selectedNode.position.z.toFixed(3)}</dd></div>
             <div><dt>Unidade</dt><dd>Não definida</dd></div>
           </dl>
+        {:else if selectedElement}
+          <dl class="node-properties">
+            <div><dt>Tipo</dt><dd>Conexão visual provisória</dd></div>
+            <div><dt>ID</dt><dd>{selectedElement.id}</dd></div>
+            <div><dt>Nó inicial</dt><dd>{selectedElement.nodeIds[0]}</dd></div>
+            <div><dt>Nó final</dt><dd>{selectedElement.nodeIds[1]}</dd></div>
+            <div><dt>Formulação FEM</dt><dd>Não definida</dd></div>
+          </dl>
         {:else}
-          <div class="empty-state">Selecione um nó no viewport ou na lista.</div>
+          <div class="empty-state">Selecione um nó ou conexão no viewport ou na lista.</div>
         {/if}
       </section>
       <p class="model-feedback" role="status" aria-live="polite">{modelFeedback || 'Pronto.'}</p>
@@ -637,6 +791,35 @@
   .node-list button:focus-visible {
     outline: 2px solid #7dd3fc;
     outline-offset: 2px;
+  }
+
+  .mesh-notice {
+    margin: 0;
+    color: #cbd5e1;
+    font-size: 0.78rem;
+    line-height: 1.45;
+  }
+
+  .mesh-action {
+    width: 100%;
+    padding: 0.55rem 0.75rem;
+    border: 1px solid #334155;
+    border-radius: 0.5rem;
+    background: #0f172a;
+    color: #64748b;
+    cursor: not-allowed;
+  }
+
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
 
   .empty-state {
