@@ -27,3 +27,10 @@
 
 ## D-008 — Validação de resultados
 **Decisão:** a quantidade de nós dos resultados deve corresponder à quantidade de nós do modelo. Quando o contrato estiver definido, também verificar identidade/IDs e metadados, pois contagens iguais não garantem que os resultados pertençam ao modelo atual.
+
+## D-009 — Biblioteca de viewport 3D
+**Decisão:** usar Three.js diretamente no componente Svelte do viewport e `OrbitControls` para navegação.
+
+**Motivo:** Three.js oferece controle explícito sobre câmera, grid, eixos e projeção de posições em planos de trabalho. A integração direta evita adicionar uma camada de componentes/framework 3D antes de haver necessidades de domínio que a justifiquem.
+
+**Convenções iniciais:** Z é o eixo vertical; o plano XY é o plano de trabalho inicial. O viewport permite alternar entre XY, XZ e YZ. A prévia de posição não cria nós; a criação pertence à etapa seguinte.

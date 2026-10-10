@@ -1,6 +1,9 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import { logger, type LogEntry, type LogLevel } from './lib/logging';
+  import SceneViewport from './lib/viewport/SceneViewport.svelte';
+  import type { CameraView } from './lib/viewport/types';
+  import type { WorkPlane } from './lib/viewport/workPlane';
 
   type ToolType = 'select' | 'nodes' | 'elements' | 'materials' | 'sections' | 'loads' | 'supports';
   type LogFilter = LogLevel | 'all';
@@ -23,15 +26,68 @@
     { value: 'error', label: 'Error' },
   ];
 
+  const cameraViews: Array<{ id: CameraView; label: string }> = [
+    { id: 'top', label: 'Topo' },
+    { id: 'bottom', label: 'Base' },
+    { id: 'front', label: 'Frente' },
+    { id: 'back', label: 'Trás' },
+    { id: 'left', label: 'Esquerda' },
+    { id: 'right', label: 'Direita' },
+    { id: 'isometric', label: 'Isométrica' },
+  ];
+
   let activeTool: ToolType = 'select';
   let logFilter: LogFilter = 'all';
   let logs: LogEntry[] = [];
+  let gridSpacing = 1;
+  let lastValidGridSpacing = gridSpacing;
+  let snapToGrid = true;
+  let workPlane: WorkPlane = 'XY';
+  let cameraView: CameraView = 'isometric';
 
   const setTool = (toolId: ToolType): void => {
     activeTool = toolId;
     logger.info('model.tool.changed', 'Ferramenta de edição alterada', {
       toolId,
       source: 'toolbar',
+    });
+  };
+
+  const handleGridSpacingChange = (event: Event): void => {
+    const input = event.currentTarget;
+    if (!(input instanceof HTMLInputElement)) {
+      return;
+    }
+
+    const value = input.valueAsNumber;
+    if (!Number.isFinite(value) || value < 0.1 || value > 10) {
+      logger.warn(
+        'viewport.grid.spacing.invalid',
+        'Espaçamento fora do intervalo permitido; valor anterior mantido.',
+        { value: input.value, minimum: 0.1, maximum: 10 },
+      );
+      gridSpacing = lastValidGridSpacing;
+      return;
+    }
+
+    lastValidGridSpacing = value;
+    logger.info('viewport.grid.changed', 'Espaçamento do grid alterado', {
+      spacing: value,
+      workPlane,
+    });
+  };
+
+  const handleSnapChange = (): void => {
+    logger.info('viewport.snap.changed', 'Snap-to-grid alterado', {
+      enabled: snapToGrid,
+      workPlane,
+      spacing: gridSpacing,
+    });
+  };
+
+  const handleWorkPlaneChange = (): void => {
+    logger.info('viewport.work_plane.changed', 'Plano de trabalho alterado', {
+      workPlane,
     });
   };
 
@@ -92,9 +148,61 @@
     </aside>
 
     <main class="viewport-panel" aria-label="Viewport 3D">
-      <div class="viewport-surface">
-        <div class="viewport-label">Viewport 3D</div>
+      <div class="viewport-toolbar" aria-label="Controles do viewport">
+        <div class="view-presets" role="group" aria-label="Vistas predefinidas">
+          {#each cameraViews as view}
+            <button
+              type="button"
+              class:active={cameraView === view.id}
+              aria-pressed={cameraView === view.id}
+              on:click={() => (cameraView = view.id)}
+            >
+              {view.label}
+            </button>
+          {/each}
+        </div>
+
+        <label class="grid-spacing-control">
+          <span>Grid</span>
+          <input
+            type="number"
+            min="0.1"
+            max="10"
+            step="0.1"
+            aria-label="Espaçamento do grid"
+            bind:value={gridSpacing}
+            on:change={handleGridSpacingChange}
+          />
+        </label>
+
+        <label class="work-plane-control">
+          <span>Plano</span>
+          <select
+            aria-label="Plano de trabalho"
+            bind:value={workPlane}
+            on:change={handleWorkPlaneChange}
+          >
+            <option value="XY">XY</option>
+            <option value="XZ">XZ</option>
+            <option value="YZ">YZ</option>
+          </select>
+        </label>
+
+        <label class="snap-control">
+          <input type="checkbox" bind:checked={snapToGrid} on:change={handleSnapChange} />
+          <span>Snap-to-grid</span>
+        </label>
       </div>
+
+      <div class="viewport-help">
+        Arrastar: orbitar · botão direito: mover · roda: zoom · o marcador mostra a posição calculada
+      </div>
+      <SceneViewport
+        spacing={gridSpacing}
+        snapToGrid={snapToGrid}
+        {workPlane}
+        {cameraView}
+      />
     </main>
 
     <aside class="context-panel" aria-label="Painel lateral do modelo">
@@ -213,6 +321,7 @@
 
   .toolbar button:hover,
   .tool-panel button:hover,
+  .view-presets button:hover,
   .log-filters button:hover {
     border-color: #60a5fa;
     background: #111827;
@@ -235,6 +344,7 @@
   }
 
   .tool-panel {
+    grid-column: 1;
     grid-row: 1 / span 2;
   }
 
@@ -269,39 +379,69 @@
   }
 
   .viewport-panel {
+    grid-column: 2;
+    grid-row: 1;
     display: flex;
-    align-items: stretch;
-    justify-content: stretch;
+    flex-direction: column;
+    gap: 0.55rem;
     padding: 1rem;
     background: #020817;
     border-right: 1px solid #1f2937;
+    min-width: 0;
+    min-height: 0;
   }
 
-  .viewport-surface {
-    position: relative;
-    width: 100%;
-    min-height: 420px;
-    border: 1px dashed #475569;
-    border-radius: 1rem;
-    background:
-      linear-gradient(rgba(148, 163, 184, 0.08) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(148, 163, 184, 0.08) 1px, transparent 1px),
-      #0f172a;
-    background-size: 24px 24px, 24px 24px, auto;
-    display: grid;
-    place-items: center;
+  .viewport-toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.55rem;
   }
 
-  .viewport-label {
+  .view-presets {
+    display: flex;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+  }
+
+  .view-presets button,
+  .viewport-toolbar input,
+  .viewport-toolbar select {
+    min-height: 2.15rem;
+    border: 1px solid #334155;
+    border-radius: 0.45rem;
+    background: #0f172a;
+    color: #e2e8f0;
+    padding: 0.35rem 0.55rem;
+  }
+
+  .view-presets button {
+    cursor: pointer;
+  }
+
+  .view-presets button.active {
+    background: #1d4ed8;
+    border-color: #60a5fa;
+  }
+
+  .grid-spacing-control,
+  .work-plane-control,
+  .snap-control {
     display: inline-flex;
     align-items: center;
-    justify-content: center;
-    padding: 0.7rem 1.2rem;
-    border-radius: 999px;
-    background: rgba(15, 23, 42, 0.8);
-    border: 1px solid #475569;
+    gap: 0.4rem;
     color: #cbd5e1;
-    font-weight: 600;
+    font-size: 0.8rem;
+  }
+
+  .grid-spacing-control input {
+    width: 4.8rem;
+  }
+
+  .viewport-help {
+    color: #94a3b8;
+    font-size: 0.72rem;
+    line-height: 1.35;
   }
 
   .context-panel {
@@ -436,6 +576,7 @@
   @media (max-width: 980px) {
     .workspace {
       grid-template-columns: 200px minmax(0, 1fr);
+      grid-template-rows: minmax(440px, 1fr) auto 230px;
     }
 
     .context-panel {
@@ -447,6 +588,16 @@
     .log-panel {
       grid-column: 1 / span 2;
       grid-row: 3;
+    }
+
+    .tool-panel {
+      grid-column: 1;
+      grid-row: 1;
+    }
+
+    .viewport-panel {
+      grid-column: 2;
+      grid-row: 1;
     }
   }
 </style>
