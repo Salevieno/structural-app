@@ -365,15 +365,32 @@
       return;
     }
 
-    if (activeTool === 'select') {
+    if (
+      activeTool === 'select' ||
+      activeTool === 'materials' ||
+      activeTool === 'sections' ||
+      activeTool === 'loads' ||
+      activeTool === 'supports'
+    ) {
       const nodeId = pickNode(event.clientX, event.clientY);
-      if (nodeId) {
+      if (nodeId && (activeTool === 'select' || activeTool === 'loads' || activeTool === 'supports')) {
         onSelectionChange?.(nodeId);
         return;
       }
+      if (activeTool === 'loads') {
+        onInteractionNotice?.(
+          'Cargas concentradas são aplicadas a nós. Cargas distribuídas em elementos serão implementadas posteriormente.',
+        );
+        return;
+      }
+      if (activeTool === 'supports') {
+        return;
+      }
       const elementId = pickElement(event.clientX, event.clientY);
-      onSelectionChange?.(undefined);
-      onElementSelectionChange?.(elementId);
+      if (elementId || activeTool === 'select') {
+        onSelectionChange?.(undefined);
+        onElementSelectionChange?.(elementId);
+      }
       return;
     }
 
@@ -585,7 +602,13 @@
         ? 'Viewport 3D. Clique em um nó para selecioná-lo; arraste com o botão esquerdo para orbitar, botão direito para mover e use a roda para zoom.'
         : activeTool === 'elements'
           ? 'Viewport 3D. Clique em dois nós existentes para criar uma conexão visual provisória.'
-          : 'Viewport 3D. A ferramenta selecionada não interage com o viewport nesta etapa.'}
+          : activeTool === 'materials' || activeTool === 'sections'
+            ? 'Viewport 3D. Clique em uma conexão para selecionar e atribuir materiais ou seções.'
+            : activeTool === 'loads'
+              ? 'Viewport 3D. Clique em um nó para selecionar e aplicar cargas concentradas ou deslocamentos.'
+              : activeTool === 'supports'
+                ? 'Viewport 3D. Clique em um nó para selecionar e atribuir apoios.'
+                : 'Viewport 3D. A ferramenta selecionada não interage com o viewport nesta etapa.'}
     on:pointermove={updatePointerPreview}
     on:pointerdown={handlePointerDown}
     on:pointerup={handlePointerUp}
@@ -615,9 +638,9 @@
 <style>
   .viewport-canvas {
     position: relative;
+    flex: 1 1 0;
     width: 100%;
-    height: 100%;
-    min-height: 360px;
+    min-height: 0;
     overflow: hidden;
     border: 1px dashed #475569;
     border-radius: 1rem;
@@ -628,7 +651,7 @@
     display: block;
     width: 100%;
     height: 100%;
-    min-height: 360px;
+    min-height: 0;
     touch-action: none;
   }
 
