@@ -1,5 +1,9 @@
 <script lang="ts">
+  import { onDestroy, onMount } from 'svelte';
+  import { logger, type LogEntry, type LogLevel } from './lib/logging';
+
   type ToolType = 'select' | 'nodes' | 'elements' | 'materials' | 'sections' | 'loads' | 'supports';
+  type LogFilter = LogLevel | 'all';
 
   const tools: Array<{ id: ToolType; label: string }> = [
     { id: 'select', label: 'Seleção' },
@@ -11,7 +15,46 @@
     { id: 'supports', label: 'Apoios' },
   ];
 
-  const activeTool = 'select';
+  const logFilters: Array<{ value: LogFilter; label: string }> = [
+    { value: 'all', label: 'Todos' },
+    { value: 'debug', label: 'Debug' },
+    { value: 'info', label: 'Info' },
+    { value: 'warn', label: 'Warn' },
+    { value: 'error', label: 'Error' },
+  ];
+
+  let activeTool: ToolType = 'select';
+  let logFilter: LogFilter = 'all';
+  let logs: LogEntry[] = [];
+
+  const setTool = (toolId: ToolType): void => {
+    activeTool = toolId;
+    logger.info('model.tool.changed', 'Ferramenta de edição alterada', {
+      toolId,
+      source: 'toolbar',
+    });
+  };
+
+  const unsubscribe = logger.subscribe((entry) => {
+    logs = [entry, ...logs].slice(0, 60);
+  });
+
+  onMount(() => {
+    logger.info('app.started', 'Aplicação iniciada', {
+      layout: 'shell',
+      toolCount: tools.length,
+    });
+    logger.warn('layout.initialized', 'Layout inicial em modo de estrutura vazia.', {
+      activeTool,
+      status: 'waiting-for-model-data',
+    });
+  });
+
+  onDestroy(() => {
+    unsubscribe();
+  });
+
+  $: filteredLogs = logs.filter((entry) => logFilter === 'all' || entry.level === logFilter);
 </script>
 
 <div class="app-shell" aria-label="Aplicação estrutural inicial">
@@ -35,7 +78,12 @@
       <ul>
         {#each tools as tool}
           <li>
-            <button type="button" class:active={tool.id === activeTool}>
+            <button
+              type="button"
+              class:active={tool.id === activeTool}
+              aria-pressed={tool.id === activeTool}
+              on:click={() => setTool(tool.id)}
+            >
               {tool.label}
             </button>
           </li>
@@ -61,10 +109,37 @@
     </aside>
 
     <aside class="log-panel" aria-label="Painel de logs e diagnósticos">
-      <header>
+      <header class="log-header">
         <h2>Logs</h2>
+        <div class="log-filters" aria-label="Filtros de log">
+          {#each logFilters as filter}
+            <button
+              type="button"
+              class:selected={logFilter === filter.value}
+              on:click={() => (logFilter = filter.value)}
+            >
+              {filter.label}
+            </button>
+          {/each}
+        </div>
       </header>
-      <div class="empty-state">Sem eventos registrados</div>
+
+      {#if filteredLogs.length === 0}
+        <div class="empty-state log-empty">Sem eventos registrados</div>
+      {:else}
+        <ul class="log-list">
+          {#each filteredLogs as log}
+            <li class={`log-item ${log.level}`}>
+              <div class="log-meta">
+                <span class="log-badge">{log.level.toUpperCase()}</span>
+                <time>{new Date(log.timestamp).toLocaleTimeString('pt-BR')}</time>
+              </div>
+              <strong>{log.event}</strong>
+              <p>{log.message}</p>
+            </li>
+          {/each}
+        </ul>
+      {/if}
     </aside>
   </div>
 </div>
@@ -125,7 +200,8 @@
   }
 
   .toolbar button,
-  .tool-panel button {
+  .tool-panel button,
+  .log-filters button {
     border: 1px solid #334155;
     background: #0f172a;
     color: #e2e8f0;
@@ -136,7 +212,8 @@
   }
 
   .toolbar button:hover,
-  .tool-panel button:hover {
+  .tool-panel button:hover,
+  .log-filters button:hover {
     border-color: #60a5fa;
     background: #111827;
   }
@@ -144,7 +221,7 @@
   .workspace {
     display: grid;
     grid-template-columns: 220px minmax(0, 1fr) 280px;
-    grid-template-rows: minmax(0, 1fr) 200px;
+    grid-template-rows: minmax(0, 1fr) 230px;
     flex: 1;
     min-height: 0;
   }
@@ -185,7 +262,8 @@
     text-align: left;
   }
 
-  .tool-panel button.active {
+  .tool-panel button.active,
+  .log-filters button.selected {
     background: #1d4ed8;
     border-color: #60a5fa;
   }
@@ -259,6 +337,100 @@
     border-top: 1px solid #1f2937;
     border-right: none;
     min-height: 200px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .log-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+
+  .log-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .log-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    overflow: auto;
+  }
+
+  .log-item {
+    border: 1px solid #334155;
+    border-radius: 0.75rem;
+    background: rgba(15, 23, 42, 0.75);
+    padding: 0.7rem 0.8rem;
+  }
+
+  .log-item.debug {
+    border-left: 3px solid #38bdf8;
+  }
+
+  .log-item.info {
+    border-left: 3px solid #34d399;
+  }
+
+  .log-item.warn {
+    border-left: 3px solid #fbbf24;
+  }
+
+  .log-item.error {
+    border-left: 3px solid #f87171;
+  }
+
+  .log-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.25rem;
+  }
+
+  .log-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 3.2rem;
+    border-radius: 999px;
+    background: rgba(15, 23, 42, 0.9);
+    border: 1px solid #475569;
+    padding: 0.2rem 0.45rem;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+  }
+
+  .log-item time {
+    font-size: 0.74rem;
+    color: #94a3b8;
+  }
+
+  .log-item strong {
+    display: block;
+    margin-bottom: 0.2rem;
+    font-size: 0.82rem;
+  }
+
+  .log-item p {
+    margin: 0;
+    color: #cbd5e1;
+    font-size: 0.78rem;
+    line-height: 1.4;
+  }
+
+  .log-empty {
+    min-height: 90px;
   }
 
   @media (max-width: 980px) {
