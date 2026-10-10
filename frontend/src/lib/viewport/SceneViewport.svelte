@@ -1,0 +1,422 @@
+<script lang="ts">
+  import { onDestroy, onMount } from 'svelte';
+  import * as THREE from 'three';
+  import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+  import { logger } from '../logging';
+  import type { CameraView } from './types';
+  import { snapPositionToGrid, type Position3D, type WorkPlane } from './workPlane';
+
+  export let spacing = 1;
+  export let snapToGrid = true;
+  export let workPlane: WorkPlane = 'XY';
+  export let cameraView: CameraView = 'isometric';
+
+  let canvasElement: HTMLCanvasElement;
+  let scene: THREE.Scene | undefined;
+  let camera: THREE.PerspectiveCamera | undefined;
+  let renderer: THREE.WebGLRenderer | undefined;
+  let controls: OrbitControls | undefined;
+  let grid: THREE.LineSegments | undefined;
+  let previewMarker: THREE.Mesh | undefined;
+  let resizeObserver: ResizeObserver | undefined;
+  let animationFrameId = 0;
+  let appliedSpacing = spacing;
+  let appliedWorkPlane = workPlane;
+  let appliedCameraView = cameraView;
+  let viewportError = '';
+  let rawPointerPosition: Position3D | undefined;
+  let pointerPosition: Position3D | undefined;
+  let lastPointerCoordinates: { x: number; y: number } | undefined;
+
+  const viewDirections: Record<CameraView, { direction: THREE.Vector3; up: THREE.Vector3 }> = {
+    top: { direction: new THREE.Vector3(0, 0, 1), up: new THREE.Vector3(0, 1, 0) },
+    bottom: { direction: new THREE.Vector3(0, 0, -1), up: new THREE.Vector3(0, -1, 0) },
+    front: { direction: new THREE.Vector3(0, -1, 0), up: new THREE.Vector3(0, 0, 1) },
+    back: { direction: new THREE.Vector3(0, 1, 0), up: new THREE.Vector3(0, 0, 1) },
+    left: { direction: new THREE.Vector3(-1, 0, 0), up: new THREE.Vector3(0, 0, 1) },
+    right: { direction: new THREE.Vector3(1, 0, 0), up: new THREE.Vector3(0, 0, 1) },
+    isometric: {
+      direction: new THREE.Vector3(1, -1, 1).normalize(),
+      up: new THREE.Vector3(0, 0, 1),
+    },
+  };
+
+  const createGrid = (): THREE.LineSegments => {
+    const segments: THREE.Vector3[] = [];
+    const extent = 20;
+    const lineCount = Math.floor((extent * 2) / spacing);
+
+    for (let index = 0; index <= lineCount; index += 1) {
+      const coordinate = -extent + index * spacing;
+      switch (workPlane) {
+        case 'XY':
+          segments.push(
+            new THREE.Vector3(coordinate, -extent, 0),
+            new THREE.Vector3(coordinate, extent, 0),
+            new THREE.Vector3(-extent, coordinate, 0),
+            new THREE.Vector3(extent, coordinate, 0),
+          );
+          break;
+        case 'XZ':
+          segments.push(
+            new THREE.Vector3(coordinate, 0, -extent),
+            new THREE.Vector3(coordinate, 0, extent),
+            new THREE.Vector3(-extent, 0, coordinate),
+            new THREE.Vector3(extent, 0, coordinate),
+          );
+          break;
+        case 'YZ':
+          segments.push(
+            new THREE.Vector3(0, coordinate, -extent),
+            new THREE.Vector3(0, coordinate, extent),
+            new THREE.Vector3(0, -extent, coordinate),
+            new THREE.Vector3(0, extent, coordinate),
+          );
+          break;
+      }
+    }
+
+    const geometry = new THREE.BufferGeometry().setFromPoints(segments);
+    const material = new THREE.LineBasicMaterial({ color: 0x475569, transparent: true, opacity: 0.7 });
+    return new THREE.LineSegments(geometry, material);
+  };
+
+  const createAxes = (): THREE.Group => {
+    const axes = new THREE.Group();
+    const axisDefinitions: Array<{ direction: THREE.Vector3; color: number }> = [
+      { direction: new THREE.Vector3(1, 0, 0), color: 0xf87171 },
+      { direction: new THREE.Vector3(0, 1, 0), color: 0x4ade80 },
+      { direction: new THREE.Vector3(0, 0, 1), color: 0x60a5fa },
+    ];
+
+    axisDefinitions.forEach(({ direction, color }) => {
+      const geometry = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(0, 0, 0),
+        direction.clone().multiplyScalar(20),
+      ]);
+      axes.add(new THREE.Line(geometry, new THREE.LineBasicMaterial({ color })));
+    });
+
+    return axes;
+  };
+
+  const applyCameraView = (view: CameraView): void => {
+    if (!camera || !controls) {
+      return;
+    }
+
+    const { direction, up } = viewDirections[view];
+    const distance = 32;
+    camera.up.copy(up);
+    camera.position.copy(direction).multiplyScalar(distance);
+    camera.lookAt(0, 0, 0);
+    controls.target.set(0, 0, 0);
+    controls.update();
+    appliedCameraView = view;
+    logger.info('viewport.camera.changed', 'Vista do viewport alterada', { view });
+  };
+
+  const updateGrid = (): void => {
+    if (!scene) {
+      return;
+    }
+
+    if (grid) {
+      scene.remove(grid);
+      grid.geometry.dispose();
+      const materials = Array.isArray(grid.material) ? grid.material : [grid.material];
+      materials.forEach((material) => material.dispose());
+    }
+
+    grid = createGrid();
+    scene.add(grid);
+    appliedSpacing = spacing;
+    appliedWorkPlane = workPlane;
+  };
+
+  const getPlane = (): THREE.Plane => {
+    const normal =
+      workPlane === 'XY'
+        ? new THREE.Vector3(0, 0, 1)
+        : workPlane === 'XZ'
+          ? new THREE.Vector3(0, 1, 0)
+          : new THREE.Vector3(1, 0, 0);
+
+    return new THREE.Plane(normal, 0);
+  };
+
+  const updatePointerPreviewAt = (clientX: number, clientY: number): void => {
+    if (!camera || !renderer || !previewMarker) {
+      return;
+    }
+
+    const bounds = renderer.domElement.getBoundingClientRect();
+    if (bounds.width === 0 || bounds.height === 0) {
+      return;
+    }
+    const pointer = new THREE.Vector2(
+      ((clientX - bounds.left) / bounds.width) * 2 - 1,
+      -((clientY - bounds.top) / bounds.height) * 2 + 1,
+    );
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(pointer, camera);
+
+    const intersection = raycaster.ray.intersectPlane(getPlane(), new THREE.Vector3());
+    if (!intersection) {
+      previewMarker.visible = false;
+      rawPointerPosition = undefined;
+      pointerPosition = undefined;
+      return;
+    }
+
+    rawPointerPosition = { x: intersection.x, y: intersection.y, z: intersection.z };
+    const displayedPoint = snapToGrid
+      ? snapPositionToGrid(rawPointerPosition, spacing, workPlane)
+      : rawPointerPosition;
+    previewMarker.position.set(displayedPoint.x, displayedPoint.y, displayedPoint.z);
+    previewMarker.visible = true;
+    pointerPosition = displayedPoint;
+  };
+
+  const updatePointerPreview = (event: PointerEvent): void => {
+    lastPointerCoordinates = { x: event.clientX, y: event.clientY };
+    updatePointerPreviewAt(event.clientX, event.clientY);
+  };
+
+  const logCameraInteraction = (): void => {
+    logger.info('viewport.camera.changed', 'Câmera do viewport navegada', {
+      interaction: 'orbit-pan-zoom',
+    });
+  };
+
+  const resizeViewport = (): void => {
+    if (!camera || !renderer || !canvasElement.parentElement) {
+      return;
+    }
+
+    const { width, height } = canvasElement.parentElement.getBoundingClientRect();
+    if (width <= 0 || height <= 0) {
+      return;
+    }
+
+    camera.aspect = width / height;
+    camera.updateProjectionMatrix();
+    renderer.setSize(width, height, false);
+  };
+
+  onMount(() => {
+    try {
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x0f172a);
+
+      camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
+      camera.up.set(0, 0, 1);
+
+      renderer = new THREE.WebGLRenderer({ canvas: canvasElement, antialias: true });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+      controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.08;
+      controls.target.set(0, 0, 0);
+      controls.addEventListener('end', logCameraInteraction);
+
+      scene.add(createAxes());
+      updateGrid();
+
+      previewMarker = new THREE.Mesh(
+        new THREE.SphereGeometry(0.12, 16, 12),
+        new THREE.MeshBasicMaterial({ color: 0xfbbf24 }),
+      );
+      previewMarker.visible = false;
+      scene.add(previewMarker);
+
+      resizeObserver = new ResizeObserver(resizeViewport);
+      const viewportElement = canvasElement.parentElement;
+      if (!viewportElement) {
+        throw new Error('O canvas do viewport não possui um elemento contêiner.');
+      }
+      resizeObserver.observe(viewportElement);
+      resizeViewport();
+      applyCameraView(cameraView);
+      logger.info('viewport.initialization.completed', 'Viewport 3D inicializado', {
+        renderer: 'three.js',
+        workPlane,
+        spacing,
+      });
+
+      const render = (): void => {
+        if (!scene || !camera || !renderer || !controls) {
+          return;
+        }
+        animationFrameId = window.requestAnimationFrame(render);
+        controls.update();
+        renderer.render(scene, camera);
+      };
+      render();
+    } catch (error: unknown) {
+      viewportError = 'Não foi possível iniciar a renderização 3D neste ambiente.';
+      const initializationError =
+        error instanceof Error ? error : new Error('Erro desconhecido ao inicializar o viewport.');
+      logger.error(
+        'viewport.initialization.failed',
+        'Falha ao inicializar o viewport 3D',
+        { renderer: 'three.js' },
+        initializationError,
+      );
+    }
+  });
+
+  onDestroy(() => {
+    window.cancelAnimationFrame(animationFrameId);
+    resizeObserver?.disconnect();
+    controls?.removeEventListener('end', logCameraInteraction);
+    controls?.dispose();
+    scene?.traverse((object) => {
+      if (object instanceof THREE.Mesh || object instanceof THREE.Line) {
+        object.geometry.dispose();
+        const materials = Array.isArray(object.material) ? object.material : [object.material];
+        materials.forEach((material) => material.dispose());
+      }
+    });
+    renderer?.dispose();
+  });
+
+  $: if (scene && (spacing !== appliedSpacing || workPlane !== appliedWorkPlane)) {
+    updateGrid();
+    if (lastPointerCoordinates) {
+      updatePointerPreviewAt(lastPointerCoordinates.x, lastPointerCoordinates.y);
+    }
+  }
+
+  $: if (previewMarker && rawPointerPosition) {
+    const position = snapToGrid
+      ? snapPositionToGrid(rawPointerPosition, spacing, workPlane)
+      : rawPointerPosition;
+    previewMarker.position.set(position.x, position.y, position.z);
+    pointerPosition = position;
+  }
+
+  $: if (camera && cameraView !== appliedCameraView) {
+    applyCameraView(cameraView);
+  }
+
+  $: if (previewMarker) {
+    previewMarker.visible = pointerPosition !== undefined;
+  }
+</script>
+
+<div class="viewport-canvas" aria-label="Cena 3D estrutural">
+  <canvas
+    bind:this={canvasElement}
+    aria-label="Viewport 3D. Arraste com o botão esquerdo para orbitar, botão direito para mover e use a roda para zoom."
+    on:pointermove={updatePointerPreview}
+  ></canvas>
+  {#if viewportError}
+    <p class="viewport-error" role="alert">{viewportError}</p>
+  {:else}
+    <div class="position-readout" aria-live="polite">
+      {#if pointerPosition}
+        <span>Prévia no plano {workPlane}</span>
+        <code>
+          X {pointerPosition.x.toFixed(2)} · Y {pointerPosition.y.toFixed(2)} · Z {pointerPosition.z.toFixed(2)}
+        </code>
+      {:else}
+        <span>Mova o ponteiro sobre o plano de trabalho para pré-visualizar uma posição</span>
+      {/if}
+    </div>
+    <div class="axis-legend" aria-label="Legenda dos eixos">
+      <span><i class="axis-x"></i>X</span>
+      <span><i class="axis-y"></i>Y</span>
+      <span><i class="axis-z"></i>Z</span>
+    </div>
+  {/if}
+</div>
+
+<style>
+  .viewport-canvas {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    min-height: 360px;
+    overflow: hidden;
+    border: 1px dashed #475569;
+    border-radius: 1rem;
+    background: #0f172a;
+  }
+
+  canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    min-height: 360px;
+    touch-action: none;
+  }
+
+  .position-readout,
+  .axis-legend,
+  .viewport-error {
+    position: absolute;
+    background: rgba(2, 8, 23, 0.88);
+    border: 1px solid #334155;
+    border-radius: 0.6rem;
+    color: #cbd5e1;
+    font-size: 0.75rem;
+    pointer-events: none;
+  }
+
+  .position-readout {
+    left: 0.75rem;
+    bottom: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    padding: 0.55rem 0.7rem;
+  }
+
+  .position-readout code {
+    color: #fbbf24;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  }
+
+  .axis-legend {
+    top: 0.75rem;
+    left: 0.75rem;
+    display: flex;
+    gap: 0.65rem;
+    padding: 0.45rem 0.6rem;
+  }
+
+  .axis-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+  }
+
+  .axis-legend i {
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 50%;
+  }
+
+  .axis-x {
+    background: #f87171;
+  }
+
+  .axis-y {
+    background: #4ade80;
+  }
+
+  .axis-z {
+    background: #60a5fa;
+  }
+
+  .viewport-error {
+    inset: 50% auto auto 50%;
+    transform: translate(-50%, -50%);
+    width: min(28rem, calc(100% - 2rem));
+    padding: 1rem;
+    color: #fecaca;
+    text-align: center;
+  }
+</style>

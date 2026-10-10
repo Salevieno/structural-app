@@ -70,7 +70,9 @@ Deve suportar:
 - representação visual de apoios, cargas e deslocamentos;
 - legenda/escala para resultados quando essa fase for implementada.
 
-Os controles de mouse/teclado devem ser documentados na própria UI ou em ajuda acessível. Evitar conflitos entre orbitar a câmera, selecionar objetos e criar nós. A escolha da biblioteca 3D deve ser uma decisão explícita e documentada.
+Os controles de navegação são: arrastar com botão esquerdo para orbitar, arrastar com botão direito para pan e usar a roda para zoom. As vistas predefinidas são topo, base, frente, trás, esquerda, direita e isométrica. A interface permite ajustar o espaçamento do grid, alternar snap-to-grid e selecionar os planos XY, XZ e YZ. Uma prévia no viewport mostra as coordenadas calculadas sob o ponteiro; essa prévia não cria nós.
+
+Evitar conflitos entre orbitar a câmera, selecionar objetos e criar nós. A escolha da biblioteca 3D deve ser uma decisão explícita e documentada. A decisão inicial é Three.js com `OrbitControls`, Z como eixo vertical e XY como plano de trabalho inicial; ver D-009 em `DATA_CONTRACTS.md`.
 
 ## 5. Preparação e início de análise (etapa futura)
 
