@@ -1,9 +1,10 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import { logger, type LogEntry, type LogLevel } from './lib/logging';
+  import type { StructuralNode } from './lib/domain/model';
   import SceneViewport from './lib/viewport/SceneViewport.svelte';
   import type { CameraView } from './lib/viewport/types';
-  import type { WorkPlane } from './lib/viewport/workPlane';
+  import type { Position3D, WorkPlane } from './lib/viewport/workPlane';
 
   type ToolType = 'select' | 'nodes' | 'elements' | 'materials' | 'sections' | 'loads' | 'supports';
   type LogFilter = LogLevel | 'all';
@@ -44,6 +45,11 @@
   let snapToGrid = true;
   let workPlane: WorkPlane = 'XY';
   let cameraView: CameraView = 'isometric';
+  let nodes: StructuralNode[] = [];
+  let selectedNodeId: string | undefined;
+  let modelFeedback = '';
+
+  $: selectedNode = nodes.find((node) => node.id === selectedNodeId);
 
   const setTool = (toolId: ToolType): void => {
     activeTool = toolId;
@@ -89,6 +95,54 @@
     logger.info('viewport.work_plane.changed', 'Plano de trabalho alterado', {
       workPlane,
     });
+  };
+
+  const handleNodeCreate = (position: Position3D): void => {
+    const duplicate = nodes.find(
+      (node) =>
+        node.position.x === position.x &&
+        node.position.y === position.y &&
+        node.position.z === position.z,
+    );
+
+    if (duplicate) {
+      selectedNodeId = duplicate.id;
+      modelFeedback = `Já existe o nó ${duplicate.id} exatamente nessa posição. Nenhuma tolerância de engenharia foi aplicada.`;
+      logger.warn('model.node.create.duplicate', 'Nó duplicado na mesma posição exata', {
+        nodeId: duplicate.id,
+        position,
+      });
+      return;
+    }
+
+    const node: StructuralNode = {
+      id: `node-${crypto.randomUUID()}`,
+      position,
+    };
+    nodes = [...nodes, node];
+    selectedNodeId = node.id;
+    modelFeedback = `${node.id} criado no plano ${workPlane}.`;
+    logger.info('model.node.create.completed', 'Nó criado no modelo provisório', {
+      nodeId: node.id,
+      position,
+      nodeCount: nodes.length,
+    });
+  };
+
+  const handleSelectionChange = (nodeId: string | undefined): void => {
+    selectedNodeId = nodeId;
+    modelFeedback = nodeId ? `${nodeId} selecionado.` : 'Seleção removida.';
+    logger.info('model.selection.changed', 'Seleção do modelo alterada', {
+      itemType: nodeId ? 'node' : 'none',
+      ...(nodeId ? { nodeId } : {}),
+    });
+  };
+
+  const selectNodeFromList = (nodeId: string): void => {
+    if (selectedNodeId === nodeId) {
+      return;
+    }
+    handleSelectionChange(nodeId);
   };
 
   const unsubscribe = logger.subscribe((entry) => {
@@ -194,26 +248,71 @@
         </label>
       </div>
 
-      <div class="viewport-help">
-        Arrastar: orbitar · botão direito: mover · roda: zoom · o marcador mostra a posição calculada
+      <div class="viewport-help" aria-live="polite">
+        {#if activeTool === 'nodes'}
+          Clique no plano de trabalho para criar um nó · arrastar orbita · botão direito move · roda amplia
+        {:else if activeTool === 'select'}
+          Clique em um nó para selecioná-lo · arrastar orbita · botão direito move · roda amplia
+        {:else}
+          Esta ferramenta ainda não interage com o viewport nesta etapa · navegação da câmera continua disponível
+        {/if}
       </div>
       <SceneViewport
         spacing={gridSpacing}
         snapToGrid={snapToGrid}
         {workPlane}
         {cameraView}
+        {activeTool}
+        {nodes}
+        {selectedNodeId}
+        onNodeCreate={handleNodeCreate}
+        onSelectionChange={handleSelectionChange}
+        onInteractionNotice={(message) => (modelFeedback = message)}
       />
     </main>
 
     <aside class="context-panel" aria-label="Painel lateral do modelo">
       <section>
         <h2>Modelo</h2>
-        <div class="empty-state">Árvore do modelo vazia</div>
+        <p class="model-count">{nodes.length} {nodes.length === 1 ? 'nó' : 'nós'}</p>
+        {#if nodes.length === 0}
+          <div class="empty-state">Modelo sem nós. Selecione a ferramenta Nós para adicionar.</div>
+        {:else}
+          <ul class="node-list" aria-label="Nós do modelo">
+            {#each nodes as node}
+              <li>
+                <button
+                  type="button"
+                  class:selected-node={node.id === selectedNodeId}
+                  aria-pressed={node.id === selectedNodeId}
+                  on:click={() => selectNodeFromList(node.id)}
+                >
+                  <strong>{node.id}</strong>
+                  <span>
+                    ({node.position.x.toFixed(2)}, {node.position.y.toFixed(2)}, {node.position.z.toFixed(2)})
+                  </span>
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
       </section>
       <section>
         <h2>Propriedades</h2>
-        <div class="empty-state">Seleção ainda não definida</div>
+        {#if selectedNode}
+          <dl class="node-properties">
+            <div><dt>Tipo</dt><dd>Nó provisório</dd></div>
+            <div><dt>ID</dt><dd>{selectedNode.id}</dd></div>
+            <div><dt>X</dt><dd>{selectedNode.position.x.toFixed(3)}</dd></div>
+            <div><dt>Y</dt><dd>{selectedNode.position.y.toFixed(3)}</dd></div>
+            <div><dt>Z</dt><dd>{selectedNode.position.z.toFixed(3)}</dd></div>
+            <div><dt>Unidade</dt><dd>Não definida</dd></div>
+          </dl>
+        {:else}
+          <div class="empty-state">Selecione um nó no viewport ou na lista.</div>
+        {/if}
       </section>
+      <p class="model-feedback" role="status" aria-live="polite">{modelFeedback || 'Pronto.'}</p>
     </aside>
 
     <aside class="log-panel" aria-label="Painel de logs e diagnósticos">
@@ -456,6 +555,88 @@
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
+    min-height: 0;
+  }
+
+  .model-count {
+    margin: 0;
+    color: #94a3b8;
+    font-size: 0.78rem;
+  }
+
+  .node-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    list-style: none;
+    max-height: 12rem;
+    overflow: auto;
+    margin: 0;
+    padding: 0;
+  }
+
+  .node-list button {
+    display: flex;
+    width: 100%;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding: 0.55rem;
+    border: 1px solid #334155;
+    border-radius: 0.5rem;
+    background: #0f172a;
+    color: #e2e8f0;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .node-list button:hover,
+  .node-list button.selected-node {
+    border-color: #60a5fa;
+    background: #172554;
+  }
+
+  .node-list button span {
+    color: #94a3b8;
+    font-size: 0.72rem;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  }
+
+  .node-properties {
+    display: grid;
+    gap: 0.4rem;
+    margin: 0;
+    font-size: 0.78rem;
+  }
+
+  .node-properties div {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+
+  .node-properties dt {
+    color: #94a3b8;
+  }
+
+  .node-properties dd {
+    margin: 0;
+    text-align: right;
+    overflow-wrap: anywhere;
+  }
+
+  .model-feedback {
+    margin: 0;
+    padding: 0.6rem;
+    border: 1px solid #334155;
+    border-radius: 0.5rem;
+    background: rgba(15, 23, 42, 0.7);
+    color: #cbd5e1;
+    font-size: 0.76rem;
+  }
+
+  .node-list button:focus-visible {
+    outline: 2px solid #7dd3fc;
+    outline-offset: 2px;
   }
 
   .empty-state {

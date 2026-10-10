@@ -18,6 +18,13 @@ Evitar poluição visual. Ações incompatíveis com a seleção atual devem fic
 
 ## 3. Construção do modelo
 
+### 3.0 Nós provisórios e seleção (etapa atual)
+- A ferramenta **Nós** cria um nó ao clicar no plano de trabalho ativo; o snap configurado no viewport define as coordenadas enviadas ao estado do modelo.
+- A ferramenta **Seleção** permite escolher nós no viewport; a lista de nós também permite selecioná-los e consultar propriedades básicas.
+- Nós recebem destaque visual quando selecionados. O painel apresenta ID e coordenadas, sem assumir unidades.
+- A forma do nó no front-end é provisória e não estabelece o contrato definitivo do backend.
+- Duplicatas são reconhecidas somente quando as três coordenadas são exatamente iguais. Não se aplica tolerância geométrica; a regra pode mudar quando o contrato de domínio for definido.
+
 ### 3.1 Seleção de tipo de elemento
 Permitir selecionar o tipo de elemento antes de criar elementos. Os tipos e suas propriedades definitivas serão definidos posteriormente. Não inventar formulações de elementos.
 
@@ -71,6 +78,8 @@ Deve suportar:
 - legenda/escala para resultados quando essa fase for implementada.
 
 Os controles de navegação são: arrastar com botão esquerdo para orbitar, arrastar com botão direito para pan e usar a roda para zoom. As vistas predefinidas são topo, base, frente, trás, esquerda, direita e isométrica. A interface permite ajustar o espaçamento do grid, alternar snap-to-grid e selecionar os planos XY, XZ e YZ. Uma prévia no viewport mostra as coordenadas calculadas sob o ponteiro; essa prévia não cria nós.
+
+Na etapa de nós, selecionar a ferramenta **Nós** e clicar no viewport cria um nó no plano ativo; selecionar **Seleção** e clicar num nó destaca-o e exibe as propriedades no painel lateral. Arrastos da câmera são ignorados como cliques. Se o plano estiver visto de lado e não for possível calcular a interseção, a UI apresenta um aviso; use uma vista adequada ou outro plano.
 
 Evitar conflitos entre orbitar a câmera, selecionar objetos e criar nós. A escolha da biblioteca 3D deve ser uma decisão explícita e documentada. A decisão inicial é Three.js com `OrbitControls`, Z como eixo vertical e XY como plano de trabalho inicial; ver D-009 em `DATA_CONTRACTS.md`.
 
