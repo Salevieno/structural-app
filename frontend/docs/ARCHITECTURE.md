@@ -43,26 +43,23 @@ Na interface inicial, a ferramenta **Elementos** cria uma conexão visual provis
 A ferramenta **Malha** apresenta a ação de geração desabilitada enquanto o algoritmo, os tipos de elementos e os parâmetros não forem especificados. Não criar conectividade fictícia nem afirmar que uma malha é válida sem validação.
 
 ### 3.4 Materiais e seções transversais
-Permitir criar, editar, listar e selecionar materiais e seções. Os campos físicos e unidades ainda serão especificados. Manter formulários desacoplados do viewport e do formato definitivo de dados.
+Permitir criar, editar, listar e selecionar materiais e seções. O modelo provisório de material contém E e G em GPa e v sem unidade; a seção contém espessura em mm. Os presets informados são Aço (E = 200 GPa, v = 0,3, G = 500 GPa) e Concreto (E = 26,071594 GPa, v = 0,2, G = 500 GPa); seus valores podem ser editados. Excluir um material ou seção limpa suas referências nos elementos; editar preserva as referências pelo ID.
 
 ### 3.5 Cargas e deslocamentos aplicados
-A interface deverá suportar:
-- cargas concentradas aplicadas a nós;
-- deslocamentos prescritos aplicados a nós;
-- cargas distribuídas aplicadas a elementos.
+A interface aplica cargas concentradas Fx/Fy/Fz em kN e Mx/My/Mz em kNm somente a nós, e deslocamentos ux/uy/uz em mm e rotações tx/ty/tz em rad a nós. Cargas distribuídas serão implementadas posteriormente como uma categoria separada, aplicada a elementos. Apoios armazenam um booleano por grau de liberdade (verdadeiro bloqueia, falso deixa livre), com presets para ux, uy ou uz isolados, as três translações e os seis graus.
 
-A convenção de eixos, unidades, sistemas de coordenadas, sinais e formatos dos valores ainda precisa ser definida. Não assumir silenciosamente convenções físicas.
+A unidade por comprimento e a lei espacial das cargas distribuídas, convenção de sinais e sistemas de coordenadas ainda precisam ser definidos antes da implementação e validação para análise.
 
 ### 3.6 Atribuições
 - Materiais e seções: selecionar elementos e atribuir a seleção.
 - Cargas concentradas, deslocamentos prescritos e apoios: selecionar nós e atribuir.
-- Cargas distribuídas: selecionar elementos e atribuir.
+- Cargas distribuídas futuras: selecionar elementos e atribuir quando a categoria for implementada.
 - Mostrar visualmente as atribuições no modelo e/ou painel de propriedades.
 - Mostrar claramente o item selecionado e as atribuições existentes.
 - Permitir editar/remover atribuições quando o modelo de domínio suportar essa operação.
 
 ### 3.7 Apoios/condições de contorno
-Permitir aplicar condições de apoio aos nós. Os graus de liberdade disponíveis variam conforme os tipos de elemento e a definição de modelo. A UI não deve fixar universalmente seis graus de liberdade por nó; aguardar o contrato do modelo/DOF do backend.
+Os presets atuais refletem os seis booleanos ux, uy, uz, tx, ty e tz solicitados para esta etapa. A compatibilidade desses graus de liberdade com cada elemento permanece provisória e deverá ser validada pelo contrato do modelo/backend antes de qualquer análise.
 
 ## 4. Viewport 3D
 
