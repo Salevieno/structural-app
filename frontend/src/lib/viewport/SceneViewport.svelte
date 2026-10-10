@@ -3,11 +3,19 @@
   import * as THREE from 'three';
   import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
   import { logger } from '../logging';
-  import type { StructuralNode } from '../domain/model';
+  import type { StructuralElement, StructuralNode } from '../domain/model';
   import type { CameraView } from './types';
   import { snapPositionToGrid, type Position3D, type WorkPlane } from './workPlane';
 
-  type EditingTool = 'select' | 'nodes' | 'elements' | 'materials' | 'sections' | 'loads' | 'supports';
+  type EditingTool =
+    | 'select'
+    | 'nodes'
+    | 'elements'
+    | 'mesh'
+    | 'materials'
+    | 'sections'
+    | 'loads'
+    | 'supports';
 
   export let spacing = 1;
   export let snapToGrid = true;
@@ -15,9 +23,14 @@
   export let cameraView: CameraView = 'isometric';
   export let activeTool: EditingTool = 'select';
   export let nodes: StructuralNode[] = [];
+  export let elements: StructuralElement[] = [];
   export let selectedNodeId: string | undefined = undefined;
+  export let selectedElementId: string | undefined = undefined;
+  export let connectionNodeIds: string[] = [];
   export let onNodeCreate: ((position: Position3D) => void) | undefined = undefined;
+  export let onElementNodePick: ((nodeId: string) => void) | undefined = undefined;
   export let onSelectionChange: ((nodeId: string | undefined) => void) | undefined = undefined;
+  export let onElementSelectionChange: ((elementId: string | undefined) => void) | undefined = undefined;
   export let onInteractionNotice: ((message: string) => void) | undefined = undefined;
 
   let canvasElement: HTMLCanvasElement;
@@ -27,6 +40,7 @@
   let controls: OrbitControls | undefined;
   let grid: THREE.LineSegments | undefined;
   let nodeGroup: THREE.Group | undefined;
+  let elementGroup: THREE.Group | undefined;
   let previewMarker: THREE.Mesh | undefined;
   let resizeObserver: ResizeObserver | undefined;
   let animationFrameId = 0;
@@ -160,13 +174,58 @@
     nodeGroup.clear();
     currentNodes.forEach((node) => {
       const isSelected = node.id === selectionId;
+      const isConnectionStart = connectionNodeIds.includes(node.id);
       const mesh = new THREE.Mesh(
-        new THREE.SphereGeometry(isSelected ? 0.24 : 0.18, 20, 14),
-        new THREE.MeshBasicMaterial({ color: isSelected ? 0xfbbf24 : 0x38bdf8 }),
+        new THREE.SphereGeometry(isSelected || isConnectionStart ? 0.24 : 0.18, 20, 14),
+        new THREE.MeshBasicMaterial({
+          color: isSelected ? 0xfbbf24 : isConnectionStart ? 0xa78bfa : 0x38bdf8,
+        }),
       );
       mesh.position.set(node.position.x, node.position.y, node.position.z);
       mesh.userData.nodeId = node.id;
       nodeGroup?.add(mesh);
+    });
+  };
+
+  const updateElements = (
+    currentElements: StructuralElement[],
+    currentNodes: StructuralNode[],
+    selectionId: string | undefined,
+  ): void => {
+    if (!elementGroup) {
+      return;
+    }
+
+    elementGroup.children.forEach((object) => {
+      if (object instanceof THREE.Line) {
+        object.geometry.dispose();
+        const materials = Array.isArray(object.material) ? object.material : [object.material];
+        materials.forEach((material) => material.dispose());
+      }
+    });
+    elementGroup.clear();
+
+    const nodesById = new Map(currentNodes.map((node) => [node.id, node]));
+    currentElements.forEach((element) => {
+      const [startNodeId, endNodeId] = element.nodeIds;
+      const startNode = nodesById.get(startNodeId);
+      const endNode = nodesById.get(endNodeId);
+      if (!startNode || !endNode) {
+        return;
+      }
+
+      const line = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([
+          new THREE.Vector3(startNode.position.x, startNode.position.y, startNode.position.z),
+          new THREE.Vector3(endNode.position.x, endNode.position.y, endNode.position.z),
+        ]),
+        new THREE.LineBasicMaterial({
+          color: element.id === selectionId ? 0xfbbf24 : 0x22d3ee,
+          linewidth: element.id === selectionId ? 3 : 2,
+        }),
+      );
+      line.userData.elementId = element.id;
+      elementGroup?.add(line);
     });
   };
 
@@ -268,6 +327,28 @@
       : undefined;
   };
 
+  const pickElement = (clientX: number, clientY: number): string | undefined => {
+    if (!camera || !renderer || !elementGroup) {
+      return undefined;
+    }
+
+    const bounds = renderer.domElement.getBoundingClientRect();
+    if (bounds.width === 0 || bounds.height === 0) {
+      return undefined;
+    }
+    const pointer = new THREE.Vector2(
+      ((clientX - bounds.left) / bounds.width) * 2 - 1,
+      -((clientY - bounds.top) / bounds.height) * 2 + 1,
+    );
+    const raycaster = new THREE.Raycaster();
+    raycaster.params.Line = { threshold: 0.2 };
+    raycaster.setFromCamera(pointer, camera);
+    const [pickedElement] = raycaster.intersectObjects(elementGroup.children, false);
+    return typeof pickedElement?.object.userData.elementId === 'string'
+      ? pickedElement.object.userData.elementId
+      : undefined;
+  };
+
   const handlePointerUp = (event: PointerEvent): void => {
     const start = pointerStart;
     pointerStart = undefined;
@@ -286,8 +367,22 @@
 
     if (activeTool === 'select') {
       const nodeId = pickNode(event.clientX, event.clientY);
-      if (nodeId !== selectedNodeId) {
+      if (nodeId) {
         onSelectionChange?.(nodeId);
+        return;
+      }
+      const elementId = pickElement(event.clientX, event.clientY);
+      onSelectionChange?.(undefined);
+      onElementSelectionChange?.(elementId);
+      return;
+    }
+
+    if (activeTool === 'elements') {
+      const nodeId = pickNode(event.clientX, event.clientY);
+      if (nodeId) {
+        onElementNodePick?.(nodeId);
+      } else {
+        onInteractionNotice?.('Para criar uma conexão, selecione nós existentes no viewport.');
       }
       return;
     }
@@ -384,6 +479,11 @@
       scene.add(nodeGroup);
       updateNodes(nodes, selectedNodeId);
 
+      elementGroup = new THREE.Group();
+      elementGroup.name = 'provisional-elements';
+      scene.add(elementGroup);
+      updateElements(elements, nodes, selectedElementId);
+
       previewMarker = new THREE.Mesh(
         new THREE.SphereGeometry(0.12, 16, 12),
         new THREE.MeshBasicMaterial({ color: 0xfbbf24 }),
@@ -455,6 +555,10 @@
     updateNodes(nodes, selectedNodeId);
   }
 
+  $: if (elementGroup) {
+    updateElements(elements, nodes, selectedElementId);
+  }
+
   $: if (previewMarker && rawPointerPosition) {
     const position = snapToGrid
       ? snapPositionToGrid(rawPointerPosition, spacing, workPlane)
@@ -479,7 +583,9 @@
       ? 'Viewport 3D. Clique no plano de trabalho para criar um nó.'
       : activeTool === 'select'
         ? 'Viewport 3D. Clique em um nó para selecioná-lo; arraste com o botão esquerdo para orbitar, botão direito para mover e use a roda para zoom.'
-        : 'Viewport 3D. A ferramenta selecionada não interage com o viewport nesta etapa.'}
+        : activeTool === 'elements'
+          ? 'Viewport 3D. Clique em dois nós existentes para criar uma conexão visual provisória.'
+          : 'Viewport 3D. A ferramenta selecionada não interage com o viewport nesta etapa.'}
     on:pointermove={updatePointerPreview}
     on:pointerdown={handlePointerDown}
     on:pointerup={handlePointerUp}

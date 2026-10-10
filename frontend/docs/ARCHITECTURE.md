@@ -38,7 +38,9 @@ Permitir selecionar o tipo de elemento antes de criar elementos. Os tipos e suas
 - Uma vista 2D não determina sozinha uma coordenada 3D. A interface deverá usar um plano de trabalho ativo e tornar esse plano visível/identificável.
 
 ### 3.3 Criar elementos e malha
-Disponibilizar ferramentas para criar elementos conectando nós e para gerar malha. O algoritmo, os tipos de elementos, as regras de compatibilidade e os parâmetros da malha serão especificados depois. Não gerar conectividade fictícia nem afirmar que uma malha é válida sem validação.
+Na interface inicial, a ferramenta **Elementos** cria uma conexão visual provisória ao selecionar dois nós existentes e distintos. Ela guarda apenas os IDs dos nós extremos e é desenhada como uma linha; não define formulação FEM, graus de liberdade, propriedades ou validade para análise. Conexões repetidas entre o mesmo par são bloqueadas sem considerar a ordem dos nós.
+
+A ferramenta **Malha** apresenta a ação de geração desabilitada enquanto o algoritmo, os tipos de elementos e os parâmetros não forem especificados. Não criar conectividade fictícia nem afirmar que uma malha é válida sem validação.
 
 ### 3.4 Materiais e seções transversais
 Permitir criar, editar, listar e selecionar materiais e seções. Os campos físicos e unidades ainda serão especificados. Manter formulários desacoplados do viewport e do formato definitivo de dados.
