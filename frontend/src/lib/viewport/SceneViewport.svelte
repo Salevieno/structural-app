@@ -3,13 +3,22 @@
   import * as THREE from 'three';
   import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
   import { logger } from '../logging';
+  import type { StructuralNode } from '../domain/model';
   import type { CameraView } from './types';
   import { snapPositionToGrid, type Position3D, type WorkPlane } from './workPlane';
+
+  type EditingTool = 'select' | 'nodes' | 'elements' | 'materials' | 'sections' | 'loads' | 'supports';
 
   export let spacing = 1;
   export let snapToGrid = true;
   export let workPlane: WorkPlane = 'XY';
   export let cameraView: CameraView = 'isometric';
+  export let activeTool: EditingTool = 'select';
+  export let nodes: StructuralNode[] = [];
+  export let selectedNodeId: string | undefined = undefined;
+  export let onNodeCreate: ((position: Position3D) => void) | undefined = undefined;
+  export let onSelectionChange: ((nodeId: string | undefined) => void) | undefined = undefined;
+  export let onInteractionNotice: ((message: string) => void) | undefined = undefined;
 
   let canvasElement: HTMLCanvasElement;
   let scene: THREE.Scene | undefined;
@@ -17,9 +26,11 @@
   let renderer: THREE.WebGLRenderer | undefined;
   let controls: OrbitControls | undefined;
   let grid: THREE.LineSegments | undefined;
+  let nodeGroup: THREE.Group | undefined;
   let previewMarker: THREE.Mesh | undefined;
   let resizeObserver: ResizeObserver | undefined;
   let animationFrameId = 0;
+  let cameraLogTimeout: number | undefined;
   let appliedSpacing = spacing;
   let appliedWorkPlane = workPlane;
   let appliedCameraView = cameraView;
@@ -134,6 +145,31 @@
     appliedWorkPlane = workPlane;
   };
 
+  const updateNodes = (currentNodes: StructuralNode[], selectionId: string | undefined): void => {
+    if (!nodeGroup) {
+      return;
+    }
+
+    nodeGroup.children.forEach((object) => {
+      if (object instanceof THREE.Mesh) {
+        object.geometry.dispose();
+        const materials = Array.isArray(object.material) ? object.material : [object.material];
+        materials.forEach((material) => material.dispose());
+      }
+    });
+    nodeGroup.clear();
+    currentNodes.forEach((node) => {
+      const isSelected = node.id === selectionId;
+      const mesh = new THREE.Mesh(
+        new THREE.SphereGeometry(isSelected ? 0.24 : 0.18, 20, 14),
+        new THREE.MeshBasicMaterial({ color: isSelected ? 0xfbbf24 : 0x38bdf8 }),
+      );
+      mesh.position.set(node.position.x, node.position.y, node.position.z);
+      mesh.userData.nodeId = node.id;
+      nodeGroup?.add(mesh);
+    });
+  };
+
   const getPlane = (): THREE.Plane => {
     const normal =
       workPlane === 'XY'
@@ -143,6 +179,21 @@
           : new THREE.Vector3(1, 0, 0);
 
     return new THREE.Plane(normal, 0);
+  };
+
+  const intersectWorkPlane = (ray: THREE.Ray): THREE.Vector3 | undefined => {
+    const plane = getPlane();
+    if (Math.abs(ray.direction.dot(plane.normal)) < 1e-6) {
+      return undefined;
+    }
+
+    const intersection = ray.intersectPlane(plane, new THREE.Vector3());
+    return intersection &&
+      Number.isFinite(intersection.x) &&
+      Number.isFinite(intersection.y) &&
+      Number.isFinite(intersection.z)
+      ? intersection
+      : undefined;
   };
 
   const updatePointerPreviewAt = (clientX: number, clientY: number): void => {
@@ -161,7 +212,7 @@
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(pointer, camera);
 
-    const intersection = raycaster.ray.intersectPlane(getPlane(), new THREE.Vector3());
+    const intersection = intersectWorkPlane(raycaster.ray);
     if (!intersection) {
       previewMarker.visible = false;
       rawPointerPosition = undefined;
@@ -183,10 +234,115 @@
     updatePointerPreviewAt(event.clientX, event.clientY);
   };
 
-  const logCameraInteraction = (): void => {
-    logger.info('viewport.camera.changed', 'Câmera do viewport navegada', {
-      interaction: 'orbit-pan-zoom',
+  let pointerStart:
+    | { pointerId: number; clientX: number; clientY: number; button: number }
+    | undefined;
+
+  const handlePointerDown = (event: PointerEvent): void => {
+    pointerStart = {
+      pointerId: event.pointerId,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      button: event.button,
+    };
+  };
+
+  const pickNode = (clientX: number, clientY: number): string | undefined => {
+    if (!camera || !renderer || !nodeGroup) {
+      return undefined;
+    }
+
+    const bounds = renderer.domElement.getBoundingClientRect();
+    if (bounds.width === 0 || bounds.height === 0) {
+      return undefined;
+    }
+    const pointer = new THREE.Vector2(
+      ((clientX - bounds.left) / bounds.width) * 2 - 1,
+      -((clientY - bounds.top) / bounds.height) * 2 + 1,
+    );
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(pointer, camera);
+    const [pickedNode] = raycaster.intersectObjects(nodeGroup.children, false);
+    return typeof pickedNode?.object.userData.nodeId === 'string'
+      ? pickedNode.object.userData.nodeId
+      : undefined;
+  };
+
+  const handlePointerUp = (event: PointerEvent): void => {
+    const start = pointerStart;
+    pointerStart = undefined;
+    if (!start || start.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const pointerMoved = Math.hypot(event.clientX - start.clientX, event.clientY - start.clientY) > 4;
+    if (pointerMoved) {
+      scheduleCameraLog(start.button === 2 ? 'pan' : 'orbit');
+      return;
+    }
+    if (start.button !== 0) {
+      return;
+    }
+
+    if (activeTool === 'select') {
+      const nodeId = pickNode(event.clientX, event.clientY);
+      if (nodeId !== selectedNodeId) {
+        onSelectionChange?.(nodeId);
+      }
+      return;
+    }
+
+    if (activeTool !== 'nodes' || !camera || !renderer || !onNodeCreate) {
+      return;
+    }
+
+    const bounds = renderer.domElement.getBoundingClientRect();
+    if (bounds.width === 0 || bounds.height === 0) {
+      return;
+    }
+    const pointer = new THREE.Vector2(
+      ((event.clientX - bounds.left) / bounds.width) * 2 - 1,
+      -((event.clientY - bounds.top) / bounds.height) * 2 + 1,
+    );
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(pointer, camera);
+    const intersection = intersectWorkPlane(raycaster.ray);
+    if (!intersection) {
+      const message = `O plano ${workPlane} está visto de lado nesta câmera. Escolha uma vista adequada ou outro plano de trabalho.`;
+      onInteractionNotice?.(message);
+      logger.warn('viewport.work_plane.not_visible', 'Não é possível projetar o clique no plano ativo', {
+        workPlane,
+        cameraView,
+      });
+      return;
+    }
+
+    const rawPosition: Position3D = {
+      x: intersection.x,
+      y: intersection.y,
+      z: intersection.z,
+    };
+    const position = snapToGrid ? snapPositionToGrid(rawPosition, spacing, workPlane) : rawPosition;
+    logger.info('model.node.create.started', 'Criação de nó solicitada', {
+      workPlane,
+      snapToGrid,
+      spacing,
     });
+    onNodeCreate(position);
+  };
+
+  const scheduleCameraLog = (interaction: 'orbit' | 'pan' | 'zoom'): void => {
+    if (cameraLogTimeout !== undefined) {
+      window.clearTimeout(cameraLogTimeout);
+    }
+    cameraLogTimeout = window.setTimeout(() => {
+      logger.info('viewport.camera.changed', 'Câmera do viewport navegada', { interaction });
+      cameraLogTimeout = undefined;
+    }, 350);
+  };
+
+  const handleWheel = (): void => {
+    scheduleCameraLog('zoom');
   };
 
   const resizeViewport = (): void => {
@@ -219,10 +375,14 @@
       controls.enableDamping = true;
       controls.dampingFactor = 0.08;
       controls.target.set(0, 0, 0);
-      controls.addEventListener('end', logCameraInteraction);
 
       scene.add(createAxes());
       updateGrid();
+
+      nodeGroup = new THREE.Group();
+      nodeGroup.name = 'structural-nodes';
+      scene.add(nodeGroup);
+      updateNodes(nodes, selectedNodeId);
 
       previewMarker = new THREE.Mesh(
         new THREE.SphereGeometry(0.12, 16, 12),
@@ -269,8 +429,10 @@
 
   onDestroy(() => {
     window.cancelAnimationFrame(animationFrameId);
+    if (cameraLogTimeout !== undefined) {
+      window.clearTimeout(cameraLogTimeout);
+    }
     resizeObserver?.disconnect();
-    controls?.removeEventListener('end', logCameraInteraction);
     controls?.dispose();
     scene?.traverse((object) => {
       if (object instanceof THREE.Mesh || object instanceof THREE.Line) {
@@ -287,6 +449,10 @@
     if (lastPointerCoordinates) {
       updatePointerPreviewAt(lastPointerCoordinates.x, lastPointerCoordinates.y);
     }
+  }
+
+  $: if (nodeGroup) {
+    updateNodes(nodes, selectedNodeId);
   }
 
   $: if (previewMarker && rawPointerPosition) {
@@ -309,8 +475,15 @@
 <div class="viewport-canvas" aria-label="Cena 3D estrutural">
   <canvas
     bind:this={canvasElement}
-    aria-label="Viewport 3D. Arraste com o botão esquerdo para orbitar, botão direito para mover e use a roda para zoom."
+    aria-label={activeTool === 'nodes'
+      ? 'Viewport 3D. Clique no plano de trabalho para criar um nó.'
+      : activeTool === 'select'
+        ? 'Viewport 3D. Clique em um nó para selecioná-lo; arraste com o botão esquerdo para orbitar, botão direito para mover e use a roda para zoom.'
+        : 'Viewport 3D. A ferramenta selecionada não interage com o viewport nesta etapa.'}
     on:pointermove={updatePointerPreview}
+    on:pointerdown={handlePointerDown}
+    on:pointerup={handlePointerUp}
+    on:wheel={handleWheel}
   ></canvas>
   {#if viewportError}
     <p class="viewport-error" role="alert">{viewportError}</p>
