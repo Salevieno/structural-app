@@ -3,7 +3,7 @@
   import * as THREE from 'three';
   import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
   import { logger } from '../logging';
-  import type { StructuralElement, StructuralNode } from '../domain/model';
+  import type { StructuralElement1D, StructuralNode, StructuralQuadElement2D } from '../domain/model';
   import type { CameraView } from './types';
   import { snapPositionToGrid, type Position3D, type WorkPlane } from './workPlane';
 
@@ -23,7 +23,8 @@
   export let cameraView: CameraView = 'isometric';
   export let activeTool: EditingTool = 'select';
   export let nodes: StructuralNode[] = [];
-  export let elements: StructuralElement[] = [];
+  export let elements: StructuralElement1D[] = [];
+  export let meshElements: readonly StructuralQuadElement2D[] = [];
   export let selectedNodeId: string | undefined = undefined;
   export let selectedElementId: string | undefined = undefined;
   export let connectionNodeIds: string[] = [];
@@ -188,7 +189,8 @@
   };
 
   const updateElements = (
-    currentElements: StructuralElement[],
+    currentElements: StructuralElement1D[],
+    currentMeshElements: readonly StructuralQuadElement2D[],
     currentNodes: StructuralNode[],
     selectionId: string | undefined,
   ): void => {
@@ -197,7 +199,7 @@
     }
 
     elementGroup.children.forEach((object) => {
-      if (object instanceof THREE.Line) {
+      if (object instanceof THREE.Line || object instanceof THREE.Mesh) {
         object.geometry.dispose();
         const materials = Array.isArray(object.material) ? object.material : [object.material];
         materials.forEach((material) => material.dispose());
@@ -226,6 +228,40 @@
       );
       line.userData.elementId = element.id;
       elementGroup?.add(line);
+    });
+    currentMeshElements.forEach((element) => {
+      const elementNodes = element.nodeIds.map((nodeId) => nodesById.get(nodeId));
+      if (elementNodes.some((node) => !node)) {
+        return;
+      }
+      const points = elementNodes.map((node) => {
+        if (!node) return new THREE.Vector3();
+        return new THREE.Vector3(node.position.x, node.position.y, node.position.z);
+      });
+      const surfaceGeometry = new THREE.BufferGeometry().setFromPoints(points);
+      surfaceGeometry.setIndex([0, 1, 2, 0, 2, 3]);
+      surfaceGeometry.computeVertexNormals();
+      const surface = new THREE.Mesh(
+        surfaceGeometry,
+        new THREE.MeshBasicMaterial({
+          color: element.id === selectionId ? 0xfbbf24 : 0x34d399,
+          transparent: true,
+          opacity: element.id === selectionId ? 0.32 : 0.16,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+        }),
+      );
+      surface.userData.elementId = element.id;
+      elementGroup?.add(surface);
+      const outline = new THREE.LineLoop(
+        new THREE.BufferGeometry().setFromPoints(points),
+        new THREE.LineBasicMaterial({
+          color: element.id === selectionId ? 0xfbbf24 : 0x34d399,
+          linewidth: element.id === selectionId ? 3 : 2,
+        }),
+      );
+      outline.userData.elementId = element.id;
+      elementGroup?.add(outline);
     });
   };
 
@@ -499,7 +535,7 @@
       elementGroup = new THREE.Group();
       elementGroup.name = 'provisional-elements';
       scene.add(elementGroup);
-      updateElements(elements, nodes, selectedElementId);
+      updateElements(elements, meshElements, nodes, selectedElementId);
 
       previewMarker = new THREE.Mesh(
         new THREE.SphereGeometry(0.12, 16, 12),
@@ -573,7 +609,7 @@
   }
 
   $: if (elementGroup) {
-    updateElements(elements, nodes, selectedElementId);
+    updateElements(elements, meshElements, nodes, selectedElementId);
   }
 
   $: if (previewMarker && rawPointerPosition) {

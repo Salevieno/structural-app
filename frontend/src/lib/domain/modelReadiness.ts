@@ -2,9 +2,13 @@ import type {
   NodalSupport,
   StructuralElement,
   StructuralMaterial,
+  StructuralMesh2D,
   StructuralNode,
+  StructuralNodalLoad,
   StructuralSection,
+  PrescribedNodalDisplacement,
 } from './model';
+import { findInvalidModelAssignments } from './degreesOfFreedom';
 
 export interface ModelReadinessIssue {
   code: string;
@@ -22,7 +26,10 @@ export interface ModelReadinessInput {
   materials: readonly StructuralMaterial[];
   sections: readonly StructuralSection[];
   supports: readonly NodalSupport[];
-  hasMesh: boolean;
+  loads: readonly StructuralNodalLoad[];
+  displacements: readonly PrescribedNodalDisplacement[];
+  mesh: StructuralMesh2D | undefined;
+  meshIsCurrent: boolean;
 }
 
 export const validateModelReadiness = ({
@@ -31,7 +38,10 @@ export const validateModelReadiness = ({
   materials,
   sections,
   supports,
-  hasMesh,
+  loads,
+  displacements,
+  mesh,
+  meshIsCurrent,
 }: ModelReadinessInput): ModelReadiness => {
   const issues: ModelReadinessIssue[] = [];
 
@@ -43,10 +53,10 @@ export const validateModelReadiness = ({
     issues.push({ code: 'elements-missing', message: 'Adicione pelo menos um elemento.' });
   }
 
-  if (!hasMesh) {
+  if (!meshIsCurrent) {
     issues.push({
       code: 'mesh-missing',
-      message: 'Gere a malha do modelo; a geração ainda não está disponível.',
+      message: 'Gere ou atualize a malha para o contorno, plano e espaçamento atuais.',
     });
   }
 
@@ -74,6 +84,21 @@ export const validateModelReadiness = ({
       code: 'support-missing',
       message: 'Aplique pelo menos um apoio a um nó existente.',
     });
+  }
+
+  if (meshIsCurrent && mesh) {
+    for (const assignment of findInvalidModelAssignments(
+      loads,
+      displacements,
+      supports,
+      mesh.elements,
+      mesh.workPlane,
+    )) {
+      issues.push({
+        code: 'invalid-degree-of-freedom',
+        message: `Atribuição inválida: ${assignment}.`,
+      });
+    }
   }
 
   return { ready: issues.length === 0, issues };
