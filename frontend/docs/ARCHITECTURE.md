@@ -84,27 +84,23 @@ Na etapa de nós, selecionar a ferramenta **Nós** e clicar no viewport cria um 
 
 Evitar conflitos entre orbitar a câmera, selecionar objetos e criar nós. A escolha da biblioteca 3D deve ser uma decisão explícita e documentada. A decisão inicial é Three.js com `OrbitControls`, Z como eixo vertical e XY como plano de trabalho inicial; ver D-009 em `DATA_CONTRACTS.md`.
 
-## 5. Preparação e início de análise (etapa futura)
+## 5. Preparação e início de análise
 
-O comando **Iniciar análise** deve permanecer desabilitado enquanto o modelo não estiver pronto. Regra mínima fornecida pelo usuário:
+O comando **Iniciar análise** permanece desabilitado enquanto o serviço está inicializando ou a validação de prontidão não passa. A regra mínima atual exige nós, elementos e malha atual, material e seção em cada elemento e pelo menos um apoio num nó existente. Cargas não são obrigatórias para prontidão.
 
-- existem nós;
-- existem elementos;
-- existem apoios;
-- existem cargas;
-- todos os elementos têm material;
-- todos os elementos têm seção transversal.
-
-Essa regra é apenas o mínimo explícito. Antes da execução real, deverá existir um validador central que informe todos os problemas encontrados, não apenas o primeiro. Regras adicionais de conectividade, unidades, graus de liberdade, estabilidade, tipos de carga e compatibilidade devem ser definidas pelo domínio/backend.
+Essa regra é apenas o mínimo de UX; regras técnicas de conectividade, unidades, estabilidade e compatibilidade permanecem responsabilidade do domínio/backend.
 
 Ao iniciar:
 1. validar o modelo;
 2. mostrar os erros/avisos encontrados;
 3. registrar o início;
 4. bloquear ou controlar comandos incompatíveis durante a análise;
-5. apresentar progresso se o backend fornecer progresso;
-6. registrar sucesso ou falha com contexto;
-7. não descartar o modelo em caso de erro.
+5. apresentar progresso recebido do serviço;
+6. permitir cancelamento cooperativo quando suportado;
+7. registrar sucesso, cancelamento ou falha com contexto;
+8. não descartar o modelo em caso de erro.
+
+O contrato versionado, os comandos/eventos Tauri e as implementações isoladas `AnalysisService` estão em `src/lib/services/analysis/`. O modo web usa serviço simulado, com aviso de que não executa cálculo estrutural. O backend atual (`backend/src/main.rs`) ainda não contém handlers Tauri; portanto a implementação nativa espera os comandos/eventos definidos em `FRONTEND_SPEC.md`. Nenhum resultado FEM é produzido nesta etapa.
 
 ## 6. Receber resultados
 

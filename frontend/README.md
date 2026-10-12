@@ -72,14 +72,18 @@ A estrutura é uma orientação, não uma exigência de criar todos os diretóri
 
 ## 5. Interfaces provisórias
 
-Exemplos de portas que poderão existir, sem fixar ainda os formatos finais:
+Portas em uso ou previstas:
 
 - `ModelService`: criar/editar modelo e obter estado do modelo.
 - `AnalysisService`: validar e iniciar análise; acompanhar progresso; receber resultados.
 - `ResultsImportService`: selecionar, ler e validar arquivo de resultados.
 - `Logger`: registrar eventos estruturados.
 
-Os contratos definitivos serão atualizados quando o usuário fornecer os modelos de estrutura e resultados.
+Os contratos de modelo e resultados continuam provisórios. O contrato de transporte da Etapa 8 está documentado em `docs/FRONTEND_SPEC.md`; ele não define formulações nem resultados de engenharia.
+
+### Etapa 8 — análise
+
+O serviço e seus adaptadores ficam em `src/lib/services/analysis/`. No navegador, a aplicação usa um serviço simulado com progresso, cancelamento e indicação explícita de que nenhum cálculo estrutural foi executado. No runtime Tauri, o adaptador usa `analysis_start`/`analysis_cancel` e os eventos `analysis://progress`, `analysis://completed`, `analysis://failed` e `analysis://cancelled`, correlacionados por `analysisId`. O backend Rust ainda não implementa esses handlers.
 
 ## 6. Estado da aplicação
 

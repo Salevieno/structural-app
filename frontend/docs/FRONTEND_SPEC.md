@@ -83,12 +83,16 @@ Implemente e valide uma etapa por vez. Não implemente toda a aplicação em uma
 **Aceite:** contorno válido gera quadriláteros de 4 nós com conectividade e orientação consistentes; casos inválidos ou sem células geram diagnóstico claro; elementos 1D continuam distintos; graus de liberdade e atribuições são validados centralmente; `npm run check`, build e testes relevantes passam.
 
 ## Etapa 8 — Contrato de análise e integração Tauri
-- Definir contrato de comandos/eventos com o backend Rust.
-- Criar `AnalysisService` com implementação simulada e implementação Tauri isoladas.
-- Tratar progresso, cancelamento (se suportado), sucesso e falha.
+- Definir contrato versionado `AnalysisRequest` para o snapshot provisório do modelo e contrato de eventos terminais/progresso correlacionados por `analysisId`.
+- Comandos Tauri: `analysis_start` recebe `{ request }` e retorna `{ analysisId }` após aceitar o trabalho; `analysis_cancel` recebe `{ analysisId }` e solicita cancelamento cooperativo.
+- Eventos Tauri: `analysis://progress` (`analysisId`, progresso 0–100, mensagem), `analysis://completed` (`analysisId`, horário), `analysis://failed` (`analysisId`, código, mensagem) e `analysis://cancelled` (`analysisId`, horário).
+- Criar `AnalysisService` com implementação simulada e implementação Tauri isoladas; fora do runtime Tauri, usar o serviço simulado.
+- Tratar progresso, cancelamento cooperativo, sucesso e falha. A conclusão simulada deve dizer claramente que nenhum cálculo estrutural foi executado.
 - Não espalhar chamadas Tauri pelos componentes.
 
-**Aceite:** UI funciona com serviço simulado; integração nativa fica isolada.
+**Limitação desta etapa:** o backend Rust ainda não fornece os comandos/eventos; sua implementação precisa cumprir o contrato acima. O snapshot e seus tipos são provisórios e não definem o contrato final de engenharia nem resultados numéricos.
+
+**Aceite:** UI funciona com serviço simulado e feedback de progresso/cancelamento/falha; adaptador Tauri isolado implementa o contrato; nenhuma conclusão simulada é apresentada como resultado estrutural real.
 
 ## Etapa 9 — Importação e validação de resultados
 - Implementar seleção/leitura de arquivo.
