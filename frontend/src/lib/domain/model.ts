@@ -4,14 +4,43 @@ import type { Position3D } from '../viewport/workPlane';
 export interface StructuralNode {
   id: string;
   position: Position3D;
+  origin?: 'user' | 'mesh';
 }
 
 // Provisional visual connection only; this does not define a finite element.
-export interface StructuralElement {
+export interface StructuralElement1D {
+  type: 'line1d';
   id: string;
   nodeIds: readonly [string, string];
   materialId?: string;
   sectionId?: string;
+}
+
+export interface StructuralMeshElement2D {
+  type: string;
+  id: string;
+  nodeIds: readonly string[];
+  materialId?: string;
+  sectionId?: string;
+}
+
+export interface StructuralQuadElement2D extends StructuralMeshElement2D {
+  type: 'quad4';
+  nodeIds: readonly [string, string, string, string];
+}
+
+export type StructuralElement = StructuralElement1D | StructuralQuadElement2D;
+
+export interface StructuralMesh2D<TElement extends StructuralMeshElement2D = StructuralQuadElement2D> {
+  id: string;
+  workPlane: 'XY' | 'XZ' | 'YZ';
+  cellSize: number;
+  boundaryNodeIds: readonly string[];
+  generatedNodeIds: readonly string[];
+  elements: readonly TElement[];
+  polygonArea: number;
+  meshedArea: number;
+  omittedArea: number;
 }
 
 export interface StructuralMaterial {
@@ -69,6 +98,7 @@ export interface StructuralDistributedLoad {
 export interface PrescribedNodalDisplacement {
   nodeId: string;
   components: DisplacementComponents;
+  activeDofs: readonly (keyof DisplacementComponents)[];
 }
 
 export interface NodalSupport {

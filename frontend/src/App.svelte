@@ -6,13 +6,29 @@
     LoadComponents,
     NodalSupport,
     PrescribedNodalDisplacement,
-    StructuralElement,
+    StructuralElement1D,
     StructuralMaterial,
     StructuralNode,
     StructuralNodalLoad,
+    StructuralQuadElement2D,
     StructuralSection,
+    StructuralMesh2D,
     SupportConstraints,
   } from './lib/domain/model';
+  import {
+    findMeshRegenerationImpact,
+    getMeshGenerationBlockReason,
+    generateCartesianQuadMesh,
+    isMeshCurrent,
+    MeshGenerationError,
+  } from './lib/domain/cartesianMesh';
+  import {
+    formatInvalidDegreesOfFreedom,
+    findInvalidModelAssignments,
+    validateDisplacementDegreesOfFreedom,
+    validateLoadDegreesOfFreedom,
+    validateSupportDegreesOfFreedom,
+  } from './lib/domain/degreesOfFreedom';
   import { validateModelReadiness } from './lib/domain/modelReadiness';
   import SceneViewport from './lib/viewport/SceneViewport.svelte';
   import type { CameraView } from './lib/viewport/types';
@@ -33,6 +49,7 @@
   type NumericInput = number | string | undefined;
   type LoadDraft = Record<LoadKey, NumericInput>;
   type DisplacementDraft = Record<DisplacementKey, NumericInput>;
+  type ActiveDisplacementDofs = Record<DisplacementKey, boolean>;
 
   const loadFields: Array<{ key: LoadKey; label: LoadKey; unit: string }> = [
     { key: 'Fx', label: 'Fx', unit: 'kN' },
@@ -98,7 +115,8 @@
   let workPlane: WorkPlane = 'XY';
   let cameraView: CameraView = 'isometric';
   let nodes: StructuralNode[] = [];
-  let elements: StructuralElement[] = [];
+  let elements: StructuralElement1D[] = [];
+  let mesh: StructuralMesh2D | undefined;
   let materials: StructuralMaterial[] = [];
   let sections: StructuralSection[] = [];
   let nodalLoads: StructuralNodalLoad[] = [];
@@ -120,18 +138,37 @@
   let editingSectionId: string | undefined;
   let nodalLoadDraft: LoadDraft = { Fx: '0', Fy: '0', Fz: '0', Mx: '0', My: '0', Mz: '0' };
   let displacementDraft: DisplacementDraft = { ux: '0', uy: '0', uz: '0', tx: '0', ty: '0', tz: '0' };
+  let activeDisplacementDofs: ActiveDisplacementDofs = {
+    ux: false,
+    uy: false,
+    uz: false,
+    tx: false,
+    ty: false,
+    tz: false,
+  };
   let supportDraft: SupportConstraints = { ux: false, uy: false, uz: false, tx: false, ty: false, tz: false };
+  let contourNodes: StructuralNode[] = [];
+  let meshIsCurrent = false;
+  let meshGenerationBlockReason: string | undefined;
   let analysisReadiness = validateModelReadiness({
     nodes,
     elements,
     materials,
     sections,
     supports: nodalSupports,
-    hasMesh: false,
+    loads: nodalLoads,
+    displacements: prescribedDisplacements,
+    mesh,
+    meshIsCurrent,
   });
 
+  $: contourNodes = nodes.filter((node) => node.origin !== 'mesh');
+  $: meshGenerationBlockReason = getMeshGenerationBlockReason(contourNodes, gridSpacing, workPlane);
+  $: meshIsCurrent = isMeshCurrent(mesh, contourNodes, gridSpacing, workPlane);
   $: selectedNode = nodes.find((node) => node.id === selectedNodeId);
-  $: selectedElement = elements.find((element) => element.id === selectedElementId);
+  $: selectedElement =
+    elements.find((element) => element.id === selectedElementId) ??
+    mesh?.elements.find((element) => element.id === selectedElementId);
   $: selectedMaterialForElement = materials.find((material) => material.id === selectedElement?.materialId);
   $: selectedSectionForElement = sections.find((section) => section.id === selectedElement?.sectionId);
   $: selectedNodalLoad = nodalLoads.find((load) => load.nodeId === selectedNodeId);
@@ -139,11 +176,14 @@
   $: selectedNodalSupport = nodalSupports.find((item) => item.nodeId === selectedNodeId);
   $: analysisReadiness = validateModelReadiness({
     nodes,
-    elements,
+    elements: [...elements, ...(mesh?.elements ?? [])],
     materials,
     sections,
     supports: nodalSupports,
-    hasMesh: false,
+    loads: nodalLoads,
+    displacements: prescribedDisplacements,
+    mesh,
+    meshIsCurrent,
   });
 
   const emptyLoadDraft = (): LoadDraft => ({ Fx: '0', Fy: '0', Fz: '0', Mx: '0', My: '0', Mz: '0' });
@@ -222,6 +262,16 @@
     const support = nodalSupports.find((item) => item.nodeId === selectedNodeId);
     nodalLoadDraft = nodalLoad ? toLoadDraft(nodalLoad.components) : emptyLoadDraft();
     displacementDraft = displacement ? toDisplacementDraft(displacement.components) : emptyDisplacementDraft();
+    activeDisplacementDofs = displacement
+      ? {
+          ux: displacement.activeDofs.includes('ux'),
+          uy: displacement.activeDofs.includes('uy'),
+          uz: displacement.activeDofs.includes('uz'),
+          tx: displacement.activeDofs.includes('tx'),
+          ty: displacement.activeDofs.includes('ty'),
+          tz: displacement.activeDofs.includes('tz'),
+        }
+      : { ux: false, uy: false, uz: false, tx: false, ty: false, tz: false };
     supportDraft = support
       ? { ...support.restraints }
       : { ux: false, uy: false, uz: false, tx: false, ty: false, tz: false };
@@ -231,9 +281,6 @@
     activeTool = toolId;
     if (toolId !== 'elements' && connectionNodeIds.length > 0) {
       connectionNodeIds = [];
-    }
-    if (toolId === 'mesh') {
-      modelFeedback = 'Geração de malha indisponível: algoritmo, parâmetros e tipos de elementos ainda não foram definidos.';
     }
     logger.info('model.tool.changed', 'Ferramenta de edição alterada', {
       toolId,
@@ -315,6 +362,91 @@
     });
   };
 
+  const generateMesh = (): void => {
+    try {
+      const result = generateCartesianQuadMesh(contourNodes, gridSpacing, workPlane);
+      const existingElementsById = new Map((mesh?.elements ?? []).map((element) => [element.id, element]));
+      const nextMesh: StructuralMesh2D = {
+        ...result.mesh,
+        elements: result.mesh.elements.map((element) => {
+          const existing = existingElementsById.get(element.id);
+          return existing
+            ? {
+                ...element,
+                ...(existing.materialId ? { materialId: existing.materialId } : {}),
+                ...(existing.sectionId ? { sectionId: existing.sectionId } : {}),
+              }
+            : element;
+        }),
+      };
+      const impact = findMeshRegenerationImpact(mesh, nextMesh, {
+        lineElements: elements,
+        loads: nodalLoads,
+        displacements: prescribedDisplacements,
+        supports: nodalSupports,
+      });
+      const invalidAssignments = findInvalidModelAssignments(
+        nodalLoads,
+        prescribedDisplacements,
+        nodalSupports,
+        nextMesh.elements,
+        nextMesh.workPlane,
+      );
+      if (impact.dependencies.length > 0 || invalidAssignments.length > 0) {
+        const reasons = [
+          ...impact.dependencies.map((dependency) => `dependência de ${dependency}`),
+          ...invalidAssignments.map((assignment) => `GDL inválido após regenerar: ${assignment}`),
+        ];
+        modelFeedback = `Malha não regenerada para preservar o modelo: ${reasons.join('; ')}.`;
+        logger.warn('model.mesh.regenerate.blocked', 'Regeneração da malha bloqueada por dependências', {
+          dependencies: impact.dependencies,
+          invalidAssignments,
+          removedNodeIds: impact.removedNodeIds,
+          removedElementIds: impact.removedElementIds,
+        });
+        return;
+      }
+
+      const nextGeneratedIds = new Set(nextMesh.generatedNodeIds);
+      nodes = [
+        ...contourNodes,
+        ...result.generatedNodes,
+      ];
+      mesh = nextMesh;
+      if (selectedElementId && !nextMesh.elements.some(({ id }) => id === selectedElementId)) {
+        selectedElementId = undefined;
+        resetSelectedAssignments();
+      }
+      const omittedMessage = result.omittedRegionDetected
+        ? ` Região do contorno não coberta por células inteiras: ${nextMesh.omittedArea.toFixed(4)} unidades².`
+        : '';
+      modelFeedback = `Malha gerada com ${nextMesh.elements.length} quadriláteros de 4 nós e ${nextGeneratedIds.size} nós gerados.${omittedMessage}`;
+      logger.info('model.mesh.generate.completed', 'Malha cartesiana 2D gerada', {
+        meshId: nextMesh.id,
+        workPlane,
+        cellSize: gridSpacing,
+        elementCount: nextMesh.elements.length,
+        generatedNodeCount: nextGeneratedIds.size,
+        polygonArea: nextMesh.polygonArea,
+        meshedArea: nextMesh.meshedArea,
+        omittedArea: nextMesh.omittedArea,
+      });
+    } catch (error) {
+      if (error instanceof MeshGenerationError) {
+        modelFeedback = error.message;
+        logger.warn('model.mesh.generate.invalid', 'Não foi possível gerar a malha', {
+          code: error.code,
+          message: error.message,
+        });
+        return;
+      }
+      logger.error('model.mesh.generate.failed', 'Falha inesperada ao gerar a malha', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  };
+
   const handleElementNodePick = (nodeId: string): void => {
     if (connectionNodeIds.includes(nodeId)) {
       modelFeedback = 'Escolha um segundo nó diferente para completar a conexão.';
@@ -355,7 +487,8 @@
       return;
     }
 
-    const element: StructuralElement = {
+    const element: StructuralElement1D = {
+      type: 'line1d',
       id: `element-${crypto.randomUUID()}`,
       nodeIds: [startNodeId, nodeId],
     };
@@ -499,6 +632,17 @@
       delete updated.materialId;
       return updated;
     });
+    if (mesh) {
+      mesh = {
+        ...mesh,
+        elements: mesh.elements.map((element) => {
+          if (element.materialId !== material.id) return element;
+          const updated = { ...element };
+          delete updated.materialId;
+          return updated;
+        }),
+      };
+    }
     if (editingMaterialId === material.id) {
       editingMaterialId = undefined;
       materialName = '';
@@ -565,6 +709,17 @@
       delete updated.sectionId;
       return updated;
     });
+    if (mesh) {
+      mesh = {
+        ...mesh,
+        elements: mesh.elements.map((element) => {
+          if (element.sectionId !== section.id) return element;
+          const updated = { ...element };
+          delete updated.sectionId;
+          return updated;
+        }),
+      };
+    }
     if (editingSectionId === section.id) {
       editingSectionId = undefined;
       sectionName = '';
@@ -578,12 +733,21 @@
 
   const assignMaterial = (material: StructuralMaterial): void => {
     if (!selectedElement) {
-      modelFeedback = 'Selecione uma conexão para atribuir um material.';
+      modelFeedback = 'Selecione um elemento 1D ou 2D para atribuir um material.';
       return;
     }
-    elements = elements.map((element) =>
-      element.id === selectedElement.id ? { ...element, materialId: material.id } : element,
-    );
+    if (selectedElement.type === 'line1d') {
+      elements = elements.map((element) =>
+        element.id === selectedElement.id ? { ...element, materialId: material.id } : element,
+      );
+    } else if (mesh) {
+      mesh = {
+        ...mesh,
+        elements: mesh.elements.map((element) =>
+          element.id === selectedElement.id ? { ...element, materialId: material.id } : element,
+        ),
+      };
+    }
     modelFeedback = `Material ${material.name} atribuído a ${selectedElement.id}.`;
     logger.info('model.element.material.assigned', 'Material atribuído ao elemento', {
       elementId: selectedElement.id,
@@ -593,12 +757,21 @@
 
   const assignSection = (section: StructuralSection): void => {
     if (!selectedElement) {
-      modelFeedback = 'Selecione uma conexão para atribuir uma seção.';
+      modelFeedback = 'Selecione um elemento 1D ou 2D para atribuir uma seção.';
       return;
     }
-    elements = elements.map((element) =>
-      element.id === selectedElement.id ? { ...element, sectionId: section.id } : element,
-    );
+    if (selectedElement.type === 'line1d') {
+      elements = elements.map((element) =>
+        element.id === selectedElement.id ? { ...element, sectionId: section.id } : element,
+      );
+    } else if (mesh) {
+      mesh = {
+        ...mesh,
+        elements: mesh.elements.map((element) =>
+          element.id === selectedElement.id ? { ...element, sectionId: section.id } : element,
+        ),
+      };
+    }
     modelFeedback = `Seção ${section.name} atribuída a ${selectedElement.id}.`;
     logger.info('model.element.section.assigned', 'Seção atribuída ao elemento', {
       elementId: selectedElement.id,
@@ -616,6 +789,20 @@
       modelFeedback = 'Informe valores numéricos finitos para os seis componentes da carga.';
       logger.warn('model.nodal_load.save.invalid', 'Componentes da carga concentrada inválidos', {
         nodeId: selectedNode.id,
+      });
+      return;
+    }
+    const invalidDofs = validateLoadDegreesOfFreedom(
+      selectedNode.id,
+      components,
+      meshIsCurrent ? mesh?.elements ?? [] : [],
+      meshIsCurrent ? mesh?.workPlane : undefined,
+    );
+    if (invalidDofs.length > 0) {
+      modelFeedback = formatInvalidDegreesOfFreedom(invalidDofs);
+      logger.warn('model.nodal_load.save.invalid_dof', 'Carga rejeitada por graus de liberdade inválidos', {
+        nodeId: selectedNode.id,
+        invalidDofs,
       });
       return;
     }
@@ -641,7 +828,31 @@
       });
       return;
     }
-    const record: PrescribedNodalDisplacement = { nodeId: selectedNode.id, components };
+    const activeDofs = displacementFields
+      .filter(({ key }) => activeDisplacementDofs[key])
+      .map(({ key }) => key);
+    if (activeDofs.length === 0) {
+      modelFeedback = 'Ative pelo menos um grau de liberdade para aplicar o deslocamento prescrito.';
+      logger.warn('model.displacement.save.no_active_dofs', 'Nenhum grau de liberdade prescrito foi selecionado', {
+        nodeId: selectedNode.id,
+      });
+      return;
+    }
+    const invalidDofs = validateDisplacementDegreesOfFreedom(
+      selectedNode.id,
+      activeDofs,
+      meshIsCurrent ? mesh?.elements ?? [] : [],
+      meshIsCurrent ? mesh?.workPlane : undefined,
+    );
+    if (invalidDofs.length > 0) {
+      modelFeedback = formatInvalidDegreesOfFreedom(invalidDofs);
+      logger.warn('model.displacement.save.invalid_dof', 'Deslocamento rejeitado por graus de liberdade inválidos', {
+        nodeId: selectedNode.id,
+        invalidDofs,
+      });
+      return;
+    }
+    const record: PrescribedNodalDisplacement = { nodeId: selectedNode.id, components, activeDofs };
     prescribedDisplacements = [
       ...prescribedDisplacements.filter((item) => item.nodeId !== selectedNode.id),
       record,
@@ -669,6 +880,19 @@
       return;
     }
     const record: NodalSupport = { nodeId: selectedNode.id, restraints: { ...supportDraft } };
+    const invalidDofs = validateSupportDegreesOfFreedom(
+      record,
+      meshIsCurrent ? mesh?.elements ?? [] : [],
+      meshIsCurrent ? mesh?.workPlane : undefined,
+    );
+    if (invalidDofs.length > 0) {
+      modelFeedback = formatInvalidDegreesOfFreedom(invalidDofs);
+      logger.warn('model.support.save.invalid_dof', 'Apoio rejeitado por graus de liberdade inválidos', {
+        nodeId: selectedNode.id,
+        invalidDofs,
+      });
+      return;
+    }
     nodalSupports = [...nodalSupports.filter((item) => item.nodeId !== selectedNode.id), record];
     modelFeedback = `Apoio aplicado a ${selectedNode.id}.`;
     logger.info('model.support.apply.completed', 'Apoio aplicado ao nó', {
@@ -691,6 +915,7 @@
     if (!selectedNode) return;
     prescribedDisplacements = prescribedDisplacements.filter((item) => item.nodeId !== selectedNode.id);
     displacementDraft = emptyDisplacementDraft();
+    activeDisplacementDofs = { ux: false, uy: false, uz: false, tx: false, ty: false, tz: false };
     modelFeedback = `Deslocamento prescrito removido de ${selectedNode.id}.`;
     logger.info('model.displacement.remove.completed', 'Deslocamento prescrito removido do nó', {
       nodeId: selectedNode.id,
@@ -819,15 +1044,15 @@
         {#if activeTool === 'nodes'}
           Clique no plano de trabalho para criar um nó · arrastar orbita · botão direito move · roda amplia
         {:else if activeTool === 'elements'}
-          Clique em dois nós distintos para criar uma conexão visual provisória · arrastar orbita
+          Clique em dois nós distintos para criar um elemento 1D visual · arrastar orbita
         {:else if activeTool === 'select'}
-          Clique em um nó ou conexão para selecionar · arrastar orbita · botão direito move · roda amplia
+          Clique em um nó ou elemento para selecionar · arrastar orbita · botão direito move · roda amplia
         {:else if activeTool === 'mesh'}
-          A geração de malha está indisponível até que tipos de elementos e algoritmo sejam definidos
+          Crie os nós do contorno em qualquer ordem; a ordenação automática aceita contornos convexos
         {:else if activeTool === 'materials'}
-          Clique em uma conexão para selecioná-la e atribuir um material
+          Clique em um elemento 1D ou quadrilátero 2D para atribuir um material
         {:else if activeTool === 'sections'}
-          Clique em uma conexão para selecioná-la e atribuir uma seção
+          Clique em um elemento 1D ou quadrilátero 2D para atribuir uma seção
         {:else if activeTool === 'loads'}
           Clique em um nó para cargas concentradas e deslocamentos · cargas distribuídas em elementos serão adicionadas posteriormente
         {:else if activeTool === 'supports'}
@@ -844,6 +1069,7 @@
         {activeTool}
         {nodes}
         {elements}
+        meshElements={mesh?.elements ?? []}
         {selectedNodeId}
         {selectedElementId}
         {connectionNodeIds}
@@ -856,6 +1082,38 @@
     </main>
 
     <aside class="context-panel" aria-label="Painel lateral do modelo">
+      <section aria-labelledby="mesh-heading">
+        <h2 id="mesh-heading">Malha</h2>
+        <p class="mesh-notice">
+          {#if meshIsCurrent && mesh}
+            {mesh.elements.length} quadriláteros · célula {mesh.cellSize} · plano {mesh.workPlane}
+            {#if mesh.omittedArea > 0}
+              · área omitida: {mesh.omittedArea.toFixed(4)} unidades²
+            {/if}
+          {:else if mesh}
+            A malha existente está desatualizada. Regenere-a para o contorno, plano e espaçamento atuais.
+          {:else}
+            A ordem de criação não importa para contornos convexos. A ordenação automática atual não aceita contornos côncavos. O espaçamento do grid define o tamanho da célula.
+          {/if}
+        </p>
+        <button
+          type="button"
+          class="mesh-action"
+          disabled={meshGenerationBlockReason !== undefined}
+          aria-describedby="mesh-generation-guidance"
+          on:click={generateMesh}
+        >
+          {mesh ? 'Gerar / regenerar malha' : 'Gerar malha 2D'}
+        </button>
+        <p id="mesh-generation-guidance" class:mesh-blocked={meshGenerationBlockReason !== undefined} class="mesh-notice" role="status" aria-live="polite">
+          {meshGenerationBlockReason ?? 'Pronto para gerar; os nós serão reordenados automaticamente.'}
+        </p>
+        {#if mesh?.elements.length}
+          <p class="model-count" aria-label="Contagem de elementos da malha">
+            {mesh.elements.length} elemento(s) quadrilateral(is) de 4 nós
+          </p>
+        {/if}
+      </section>
       <section aria-labelledby="analysis-readiness-heading">
         <h2 id="analysis-readiness-heading">Prontidão para análise</h2>
         <p
@@ -904,12 +1162,10 @@
       </section>
       <section>
         <h2>Elementos</h2>
-        <p class="model-count">
-          {elements.length} {elements.length === 1 ? 'conexão provisória' : 'conexões provisórias'}
-        </p>
+        <p class="model-count">{elements.length} elemento(s) 1D explícito(s)</p>
         {#if elements.length === 0}
           <div class="empty-state">
-            Nenhuma conectividade. Selecione Elementos e clique em dois nós distintos.
+            Nenhum elemento 1D. Selecione Elementos e clique em dois nós distintos; não são criados automaticamente.
           </div>
         {:else}
           <ul class="node-list" aria-label="Conexões provisórias do modelo">
@@ -929,22 +1185,28 @@
           </ul>
         {/if}
       </section>
-      <section aria-labelledby="mesh-heading">
-        <h2 id="mesh-heading">Malha</h2>
-        <p class="mesh-notice">
-          Tipos de elementos, algoritmo e parâmetros ainda não foram definidos. Nenhuma malha será gerada.
-        </p>
-        <button
-          type="button"
-          class="mesh-action"
-          disabled
-          aria-describedby="mesh-unavailable-reason"
-        >
-          Gerar malha
-        </button>
-        <span id="mesh-unavailable-reason" class="visually-hidden">
-          A geração de malha está indisponível enquanto algoritmo e parâmetros não forem definidos.
-        </span>
+      <section aria-labelledby="mesh-elements-heading">
+        <h2 id="mesh-elements-heading">Elementos 2D da malha</h2>
+        <p class="model-count">{mesh?.elements.length ?? 0} quadriláteros</p>
+        {#if mesh?.elements.length}
+          <ul class="node-list" aria-label="Quadriláteros da malha">
+            {#each mesh.elements as element}
+              <li>
+                <button
+                  type="button"
+                  class:selected-node={element.id === selectedElementId}
+                  aria-pressed={element.id === selectedElementId}
+                  on:click={() => selectElementFromList(element.id)}
+                >
+                  <strong>{element.id}</strong>
+                  <span>{element.nodeIds.join(' → ')}</span>
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {:else}
+          <div class="empty-state">A malha 2D ainda não foi gerada.</div>
+        {/if}
       </section>
       {#if activeTool === 'materials'}
         <section aria-labelledby="materials-heading">
@@ -989,7 +1251,7 @@
                     <span>E {material.elasticModulusGPa} GPa · v {material.poissonRatio} · G {material.shearModulusGPa} GPa</span>
                     <div class="item-actions">
                       <button type="button" on:click={() => editMaterial(material)}>Editar</button>
-                      <button type="button" on:click={() => assignMaterial(material)} disabled={!selectedElement}>Atribuir ao elemento</button>
+                      <button type="button" on:click={() => assignMaterial(material)} disabled={!selectedElement}>Atribuir ao elemento selecionado</button>
                       <button type="button" class="danger-action" on:click={() => deleteMaterial(material)}>Remover</button>
                     </div>
                   </div>
@@ -1029,7 +1291,7 @@
                     <span>Espessura: {section.thicknessMm} mm</span>
                     <div class="item-actions">
                       <button type="button" on:click={() => editSection(section)}>Editar</button>
-                      <button type="button" on:click={() => assignSection(section)} disabled={!selectedElement}>Atribuir ao elemento</button>
+                      <button type="button" on:click={() => assignSection(section)} disabled={!selectedElement}>Atribuir ao elemento selecionado</button>
                       <button type="button" class="danger-action" on:click={() => deleteSection(section)}>Remover</button>
                     </div>
                   </div>
@@ -1065,7 +1327,20 @@
               <div class="component-grid">
                 {#each displacementFields as field}
                   <label>{field.label} ({field.unit})
-                    <input aria-label={`${field.label} (${field.unit})`} type="number" step="any" bind:value={displacementDraft[field.key]} required />
+                    <span class="dof-input">
+                      <input
+                        type="checkbox"
+                        aria-label={`Ativar atribuição de ${field.label}`}
+                        bind:checked={activeDisplacementDofs[field.key]}
+                      />
+                      <input
+                        aria-label={`${field.label} (${field.unit})`}
+                        type="number"
+                        step="any"
+                        bind:value={displacementDraft[field.key]}
+                        required
+                      />
+                    </span>
                   </label>
                 {/each}
               </div>
@@ -1138,11 +1413,17 @@
           {/if}
         {:else if selectedElement}
           <dl class="node-properties">
-            <div><dt>Tipo</dt><dd>Conexão visual provisória</dd></div>
+            <div>
+              <dt>Tipo</dt>
+              <dd>{selectedElement.type === 'line1d' ? 'Elemento 1D visual' : 'Quadrilátero 2D de 4 nós'}</dd>
+            </div>
             <div><dt>ID</dt><dd>{selectedElement.id}</dd></div>
-            <div><dt>Nó inicial</dt><dd>{selectedElement.nodeIds[0]}</dd></div>
-            <div><dt>Nó final</dt><dd>{selectedElement.nodeIds[1]}</dd></div>
-            <div><dt>Formulação FEM</dt><dd>Não definida</dd></div>
+            <div><dt>Nós</dt><dd>{selectedElement.nodeIds.join(' → ')}</dd></div>
+            {#if selectedElement.type === 'line1d'}
+              <div><dt>Rigidez/GDL 1D</dt><dd>Não definidos</dd></div>
+            {:else}
+              <div><dt>GDL nodais</dt><dd>{mesh?.workPlane === 'XY' ? 'ux, uy' : mesh?.workPlane === 'XZ' ? 'ux, uz' : 'uy, uz'}</dd></div>
+            {/if}
             <div><dt>Material</dt><dd>{selectedMaterialForElement?.name ?? 'Não atribuído'}</dd></div>
             <div><dt>Seção</dt><dd>{selectedSectionForElement?.name ?? 'Não atribuída'}</dd></div>
             <div><dt>Carga distribuída</dt><dd>Não implementada</dd></div>
@@ -1160,7 +1441,7 @@
             </div>
           {/if}
         {:else}
-          <div class="empty-state">Selecione um nó ou conexão no viewport ou na lista.</div>
+          <div class="empty-state">Selecione um nó ou elemento no viewport ou na lista.</div>
         {/if}
       </section>
       <p class="model-feedback" role="status" aria-live="polite">{modelFeedback || 'Pronto.'}</p>
@@ -1659,6 +1940,18 @@
     gap: 0.45rem;
   }
 
+  .dof-input {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 0.35rem;
+  }
+
+  .dof-input input[type='checkbox'] {
+    width: auto;
+    accent-color: #38bdf8;
+  }
+
   .constraint-grid label {
     display: flex;
     align-items: center;
@@ -1697,9 +1990,25 @@
     padding: 0.55rem 0.75rem;
     border: 1px solid #334155;
     border-radius: 0.5rem;
-    background: #0f172a;
-    color: #64748b;
+    background: #1d4ed8;
+    color: #fff;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .mesh-action:hover:not(:disabled) {
+    background: #2563eb;
+  }
+
+  .mesh-action:disabled {
+    border-color: #334155;
+    background: #1e293b;
+    color: #94a3b8;
     cursor: not-allowed;
+  }
+
+  .mesh-blocked {
+    color: #fbbf24;
   }
 
   .visually-hidden {

@@ -38,9 +38,11 @@ Permitir selecionar o tipo de elemento antes de criar elementos. Os tipos e suas
 - Uma vista 2D não determina sozinha uma coordenada 3D. A interface deverá usar um plano de trabalho ativo e tornar esse plano visível/identificável.
 
 ### 3.3 Criar elementos e malha
-Na interface inicial, a ferramenta **Elementos** cria uma conexão visual provisória ao selecionar dois nós existentes e distintos. Ela guarda apenas os IDs dos nós extremos e é desenhada como uma linha; não define formulação FEM, graus de liberdade, propriedades ou validade para análise. Conexões repetidas entre o mesmo par são bloqueadas sem considerar a ordem dos nós.
+Na ferramenta **Elementos**, o usuário seleciona dois nós existentes e distintos para criar um elemento 1D visual. Ele guarda os IDs dos nós extremos e é desenhado como uma linha; não define rigidez nem graus de liberdade. Conexões 1D repetidas entre o mesmo par são bloqueadas sem considerar a ordem dos nós.
 
-A ferramenta **Malha** apresenta a ação de geração desabilitada enquanto o algoritmo, os tipos de elementos e os parâmetros não forem especificados. Não criar conectividade fictícia nem afirmar que uma malha é válida sem validação.
+A ferramenta **Malha** usa todos os nós criados manualmente como pontos do contorno e reconstrói a ordem por ângulo ao redor do centroide; não depende da ordem de criação e normaliza o polígono para anti-horário a partir do ponto inferior esquerdo. Como pontos sem conectividade não definem com segurança a borda de um polígono côncavo, esses contornos são rejeitados com diagnóstico explícito. O espaçamento do grid define o tamanho de célula; o botão fica desabilitado com diagnóstico enquanto faltarem pré-requisitos para gerar ao menos uma célula. O gerador cartesiano aceita polígonos simples, fechados e planares, sem furos/regiões múltiplas, e produz quadriláteros 2D de 4 nós inteiramente contidos no contorno. Nós e elementos 2D gerados permanecem separados dos nós manuais e dos elementos 1D. Gaps de cobertura são informados pela área omitida. Regeneração é bloqueada se remover nós/elementos com referências de elementos 1D, cargas, deslocamentos, apoios ou atribuições.
+
+Os GDL provisórios dos quadriláteros são apenas as translações do plano (XY: ux/uy; XZ: ux/uz; YZ: uy/uz). Elementos 1D visuais não definem GDL nesta etapa. Cargas, deslocamentos prescritos (inclusive valor zero, quando ativo) e apoios são validados por um serviço de domínio central. Isso não detecta mecanismos nem singularidades globais, que ficam para o backend numérico.
 
 ### 3.4 Materiais e seções transversais
 Permitir criar, editar, listar e selecionar materiais e seções. O modelo provisório de material contém E e G em GPa e v sem unidade; a seção contém espessura em mm. Os presets informados são Aço (E = 200 GPa, v = 0,3, G = 500 GPa) e Concreto (E = 26,071594 GPa, v = 0,2, G = 500 GPa); seus valores podem ser editados. Excluir um material ou seção limpa suas referências nos elementos; editar preserva as referências pelo ID.
@@ -59,7 +61,7 @@ A unidade por comprimento e a lei espacial das cargas distribuídas, convenção
 - Permitir editar/remover atribuições quando o modelo de domínio suportar essa operação.
 
 ### 3.7 Apoios/condições de contorno
-Os presets atuais refletem os seis booleanos ux, uy, uz, tx, ty e tz solicitados para esta etapa. A compatibilidade desses graus de liberdade com cada elemento permanece provisória e deverá ser validada pelo contrato do modelo/backend antes de qualquer análise.
+Os presets atuais refletem os seis booleanos ux, uy, uz, tx, ty e tz solicitados. Durante a etapa da malha 2D, atribuições só aceitam os GDL disponíveis no nó segundo os elementos quadrilaterais conectados e seu plano. Uma atribuição válida no nó não é rejeitada apenas porque outro elemento conectado não contribui rigidez para aquele GDL. Mecanismos e GDL sem rigidez global são responsabilidade da validação numérica futura.
 
 ## 4. Viewport 3D
 

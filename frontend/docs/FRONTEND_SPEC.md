@@ -62,6 +62,9 @@ Implemente e valide uma etapa por vez. Não implemente toda a aplicação em uma
 **Aceite:** botão habilita/desabilita conforme o modelo e os problemas são explicados; nenhuma análise real é simulada como concluída. Cargas não fazem parte da condição de completude definida para esta etapa. Antes da geração de malha, a análise pode permanecer bloqueada com diagnóstico explícito.
 
 ## Etapa 7 — Geração de malha 2D e regras de graus de liberdade
+- O contorno é formado por todos os nós criados manualmente; a ordem de criação não importa. Ordenar os pontos angularmente ao redor do centroide, corrigir a orientação para anti-horária e iniciar pelo ponto inferior esquerdo. Como a ordenação não consegue determinar a borda côncava com segurança sem conectividade explícita, aceitar apenas contornos convexos e informar claramente quando o conjunto de pontos for côncavo ou inválido. O fechamento é implícito. Elementos 1D não definem o contorno.
+- Desabilitar a geração quando faltarem requisitos básicos para formar pelo menos uma célula, exibindo junto ao botão o motivo específico e atualizando-o conforme nós, plano e espaçamento mudem.
+- A malha usa o plano de trabalho ativo e o espaçamento do grid como tamanho das células.
 - Implementar geração automática de malha cartesiana a partir de um único contorno 2D: polígono simples, fechado, planar, sem furos ou regiões múltiplas.
 - Nesta versão, gerar apenas elementos quadriláteros de 4 nós.
 - Ordem dos nós de cada quadrilátero: anti-horária, começando no canto inferior esquerdo: 1 inferior esquerdo, 2 inferior direito, 3 superior direito, 4 superior esquerdo.
@@ -69,6 +72,8 @@ Implemente e valide uma etapa por vez. Não implemente toda a aplicação em uma
 - Detectar e informar quando a malha gerar zero elementos ou quando regiões estreitas do contorno forem omitidas pela regra de inclusão.
 - Manter os elementos 1D distintos dos elementos 2D da malha. O usuário cria elementos 1D selecionando dois nós; esses nós podem ser do contorno ou nós internos produzidos pela malha.
 - Não fixar seis graus de liberdade em todos os nós. Os graus de liberdade disponíveis pertencem ao modelo/nó e são definidos por uma regra central de domínio; cada tipo de elemento contribui rigidez apenas aos graus de liberdade que possui.
+- Provisoriamente, quadriláteros no plano XY disponibilizam ux/uy; no XZ, ux/uz; no YZ, uy/uz. Elementos 1D visuais não definem graus de liberdade nesta etapa. Revisar esses conjuntos quando os tipos/formulações dos elementos forem definidos.
+- Deslocamentos prescritos precisam indicar explicitamente quais componentes estão ativos para distinguir uma atribuição de valor zero de uma componente não atribuída.
 - Uma carga/deslocamento em um grau de liberdade globalmente válido não deve ser rejeitada só porque um dos elementos conectados não possui rigidez nesse grau de liberdade. Rejeitar atribuições a graus de liberdade inválidos para o nó/modelo, com mensagem clara; nunca ignorar silenciosamente uma atribuição.
 - Não tentar resolver nesta etapa mecanismos ou singularidades da matriz global. Registrar como limitação: graus de liberdade sem rigidez global e modelos instáveis precisam ser detectados/diagnosticados pelo backend numérico.
 - Projetar tipos e interfaces para permitir adicionar futuramente quadriláteros de 8 nós (cantos + meios das arestas) e 9 nós (cantos + meios das arestas + nó interno), sem implementá-los agora.
