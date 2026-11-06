@@ -1,0 +1,39 @@
+{
+  "schema": "structural-results",
+  "version": 1,
+  "projectId": "proj-001",
+  "analysisId": "analysis-demo-001",
+  "status": "completed",
+  "generatedAt": "2026-11-06T12:00:00.000Z",
+  "summary": {
+    "maxDisplacementMm": 2.48,
+    "maxRotationRad": 0.0017,
+    "reactionCount": 4
+  },
+  "nodes": [
+    { "nodeId": "N1", "uxMm": 0, "uyMm": 0, "uzMm": 0, "txRad": 0, "tyRad": 0, "tzRad": 0 },
+    { "nodeId": "N2", "uxMm": 0.21, "uyMm": 0.08, "uzMm": 0, "txRad": 0.0004, "tyRad": 0, "tzRad": 0 },
+    { "nodeId": "N3", "uxMm": 1.12, "uyMm": 2.48, "uzMm": 0, "txRad": 0.0011, "tyRad": 0, "tzRad": 0 },
+    { "nodeId": "N4", "uxMm": 0.17, "uyMm": 1.03, "uzMm": 0, "txRad": 0.0008, "tyRad": 0, "tzRad": 0 }
+  ],
+  "reactions": [
+    {
+      "nodeId": "N1",
+      "Fx_kN": 12.4,
+      "Fy_kN": 50,
+      "Fz_kN": 0,
+      "Mx_kNm": 0,
+      "My_kNm": 0,
+      "Mz_kNm": 0
+    }
+  ],
+  "elements": [
+    {
+      "elementId": "E1",
+      "type": "line1d",
+      "normalForce_kN": 8.5,
+      "shearForceY_kN": 0.8,
+      "bendingMoment_kNm": 1.2
+    }
+  ]
+}
