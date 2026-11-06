@@ -312,6 +312,9 @@
   };
 
   const setTool = (toolId: ToolType): void => {
+    if (appMode === 'results') {
+      return;
+    }
     activeTool = toolId;
     if (toolId !== 'elements' && connectionNodeIds.length > 0) {
       connectionNodeIds = [];
@@ -589,6 +592,8 @@
 
   const applyImportedModel = async (file: File): Promise<void> => {
     try {
+      importedResults = undefined;
+      analysisUiState = undefined;
       const outcome = await modelImportService.importFile(file);
       if (!outcome.valid || !outcome.data) {
         modelImportStatus = 'error';
@@ -634,6 +639,7 @@
         restraints: { ...support.restraints },
       }));
       workPlane = importedDocument.activeWorkPlane ?? workPlane;
+      activeTool = 'select';
       selectedNodeId = undefined;
       selectedElementId = undefined;
       connectionNodeIds = [];
@@ -657,6 +663,7 @@
 
   const applyImportedResults = async (file: File): Promise<void> => {
     try {
+      analysisUiState = undefined;
       const outcome = await resultsImportService.importFile(file, nodes.length);
       if (!outcome.valid || !outcome.data) {
         resultsImportStatus = 'error';
@@ -669,6 +676,7 @@
       }
 
       importedResults = outcome.data;
+      activeTool = 'select';
       resultsImportStatus = 'ready';
       const maxDisplacement = importedResults.summary?.maxDisplacementMm ?? 'N/D';
       resultsImportMessage = `Resultados importados: ${importedResults.analysisId} • ${importedResults.nodes.length} nós • deslocamento máximo ${maxDisplacement}`;
@@ -799,6 +807,7 @@
     selectedNodeId = undefined;
     selectedElementId = undefined;
     connectionNodeIds = [];
+    activeTool = 'select';
     modelFeedback = 'Nova estrutura iniciada. Comece criando nós e elementos.';
     modelImportStatus = 'idle';
     modelImportMessage = 'Nenhum arquivo de modelo importado.';
@@ -1312,6 +1321,9 @@
 
   $: filteredLogs = logs.filter((entry) => logFilter === 'all' || entry.level === logFilter);
   $: appMode = importedResults || analysisUiState?.status === 'completed' ? 'results' : 'creation';
+  $: if (appMode === 'results') {
+    activeTool = 'select';
+  }
   $: resultDisplayScale = importedResults ? resolveResultDisplayScale(importedResults.summary?.maxDisplacementMm) : 1;
   $: deformedResultNodes = buildDeformedNodePositions(
     nodes,
@@ -1385,23 +1397,25 @@
   </header>
 
   <div class="workspace" aria-label="Área principal do aplicativo">
-    <aside class="tool-panel" aria-label="Barra de ferramentas">
-      <h2>Ferramentas</h2>
-      <ul>
-        {#each tools as tool}
-          <li>
-            <button
-              type="button"
-              class:active={tool.id === activeTool}
-              aria-pressed={tool.id === activeTool}
-              on:click={() => setTool(tool.id)}
-            >
-              {tool.label}
-            </button>
-          </li>
-        {/each}
-      </ul>
-    </aside>
+    {#if appMode !== 'results'}
+      <aside class="tool-panel" aria-label="Barra de ferramentas">
+        <h2>Ferramentas</h2>
+        <ul>
+          {#each tools as tool}
+            <li>
+              <button
+                type="button"
+                class:active={tool.id === activeTool}
+                aria-pressed={tool.id === activeTool}
+                on:click={() => setTool(tool.id)}
+              >
+                {tool.label}
+              </button>
+            </li>
+          {/each}
+        </ul>
+      </aside>
+    {/if}
 
     <main class="viewport-panel" aria-label="Viewport 3D">
       <div class="viewport-toolbar" aria-label="Controles do viewport">
@@ -1418,40 +1432,44 @@
           {/each}
         </div>
 
-        <label class="grid-spacing-control">
-          <span>Grid</span>
-          <input
-            type="number"
-            min="0.1"
-            max="10"
-            step="0.1"
-            aria-label="Espaçamento do grid"
-            bind:value={gridSpacing}
-            on:change={handleGridSpacingChange}
-          />
-        </label>
+        {#if appMode !== 'results'}
+          <label class="grid-spacing-control">
+            <span>Grid</span>
+            <input
+              type="number"
+              min="0.1"
+              max="10"
+              step="0.1"
+              aria-label="Espaçamento do grid"
+              bind:value={gridSpacing}
+              on:change={handleGridSpacingChange}
+            />
+          </label>
 
-        <label class="work-plane-control">
-          <span>Plano</span>
-          <select
-            aria-label="Plano de trabalho"
-            bind:value={workPlane}
-            on:change={handleWorkPlaneChange}
-          >
-            <option value="XY">XY</option>
-            <option value="XZ">XZ</option>
-            <option value="YZ">YZ</option>
-          </select>
-        </label>
+          <label class="work-plane-control">
+            <span>Plano</span>
+            <select
+              aria-label="Plano de trabalho"
+              bind:value={workPlane}
+              on:change={handleWorkPlaneChange}
+            >
+              <option value="XY">XY</option>
+              <option value="XZ">XZ</option>
+              <option value="YZ">YZ</option>
+            </select>
+          </label>
 
-        <label class="snap-control">
-          <input type="checkbox" bind:checked={snapToGrid} on:change={handleSnapChange} />
-          <span>Snap-to-grid</span>
-        </label>
+          <label class="snap-control">
+            <input type="checkbox" bind:checked={snapToGrid} on:change={handleSnapChange} />
+            <span>Snap-to-grid</span>
+          </label>
+        {/if}
       </div>
 
       <div class="viewport-help" aria-live="polite">
-        {#if activeTool === 'nodes'}
+        {#if appMode === 'results'}
+          Modo de visualização de resultados · use as opções de resultado ou inicie uma nova estrutura para criar um modelo novo.
+        {:else if activeTool === 'nodes'}
           Clique no plano de trabalho para criar um nó · arrastar orbita · botão direito move · roda amplia
         {:else if activeTool === 'elements'}
           Clique em dois nós distintos para criar um elemento 1D visual · arrastar orbita
@@ -1495,76 +1513,78 @@
     </main>
 
     <aside class="context-panel" aria-label="Painel lateral do modelo">
-      <section aria-labelledby="mesh-heading">
-        <h2 id="mesh-heading">Malha</h2>
-        <p class="mesh-notice">
-          {#if meshIsCurrent && mesh}
-            {mesh.elements.length} quadriláteros · célula {mesh.cellSize} · plano {mesh.workPlane}
-            {#if mesh.omittedArea > 0}
-              · área omitida: {mesh.omittedArea.toFixed(4)} unidades²
-            {/if}
-          {:else if mesh}
-            A malha existente está desatualizada. Regenere-a para o contorno, plano e espaçamento atuais.
-          {:else}
-            A ordem de criação não importa para contornos convexos. A ordenação automática atual não aceita contornos côncavos. O espaçamento do grid define o tamanho da célula.
-          {/if}
-        </p>
-        <button
-          type="button"
-          class="mesh-action"
-          disabled={meshGenerationBlockReason !== undefined}
-          aria-describedby="mesh-generation-guidance"
-          on:click={generateMesh}
-        >
-          {mesh ? 'Gerar / regenerar malha' : 'Gerar malha 2D'}
-        </button>
-        <p id="mesh-generation-guidance" class:mesh-blocked={meshGenerationBlockReason !== undefined} class="mesh-notice" role="status" aria-live="polite">
-          {meshGenerationBlockReason ?? 'Pronto para gerar; os nós serão reordenados automaticamente.'}
-        </p>
-        {#if mesh?.elements.length}
-          <p class="model-count" aria-label="Contagem de elementos da malha">
-            {mesh.elements.length} elemento(s) quadrilateral(is) de 4 nós
-          </p>
-        {/if}
-      </section>
-      <section aria-labelledby="analysis-readiness-heading">
-        <h2 id="analysis-readiness-heading">Prontidão para análise</h2>
-        <p
-          id="analysis-readiness-status"
-          class:readiness-ready={analysisReadiness.ready}
-          class:readiness-blocked={!analysisReadiness.ready}
-          role="status"
-          aria-live="polite"
-          aria-atomic="true"
-        >
-          {analysisReadiness.ready ? 'Modelo pronto para análise.' : `${analysisReadiness.issues.length} problema(s) impedem a análise.`}
-        </p>
-        <ul id="analysis-readiness-issues" class="readiness-issues">
-          {#each analysisReadiness.issues as issue (issue.code + issue.message)}
-            <li>{issue.message}</li>
-          {/each}
-          {#if analysisReadiness.ready}
-            <li>Todos os requisitos mínimos de completude foram atendidos.</li>
-          {/if}
-        </ul>
-        {#if analysisServiceError}
-          <p class="analysis-message analysis-failed" role="alert">{analysisServiceError}</p>
-        {:else if analysisUiState}
-          <div class="analysis-message" role="status" aria-live="polite" aria-atomic="true">
-            <p>{analysisUiState.message}</p>
-            {#if analysisUiState.status === 'running' || analysisUiState.status === 'cancelling'}
-              <progress max="100" value={analysisUiState.progress} aria-label="Progresso da análise">
-                {analysisUiState.progress}%
-              </progress>
-              {#if analysisService.supportsCancellation}
-                <button type="button" disabled={analysisUiState.status === 'cancelling'} on:click={cancelAnalysis}>
-                  {analysisUiState.status === 'cancelling' ? 'Cancelando…' : 'Cancelar análise'}
-                </button>
+      {#if appMode !== 'results'}
+        <section aria-labelledby="mesh-heading">
+          <h2 id="mesh-heading">Malha</h2>
+          <p class="mesh-notice">
+            {#if meshIsCurrent && mesh}
+              {mesh.elements.length} quadriláteros · célula {mesh.cellSize} · plano {mesh.workPlane}
+              {#if mesh.omittedArea > 0}
+                · área omitida: {mesh.omittedArea.toFixed(4)} unidades²
               {/if}
+            {:else if mesh}
+              A malha existente está desatualizada. Regenere-a para o contorno, plano e espaçamento atuais.
+            {:else}
+              A ordem de criação não importa para contornos convexos. A ordenação automática atual não aceita contornos côncavos. O espaçamento do grid define o tamanho da célula.
             {/if}
-          </div>
-        {/if}
-      </section>
+          </p>
+          <button
+            type="button"
+            class="mesh-action"
+            disabled={meshGenerationBlockReason !== undefined}
+            aria-describedby="mesh-generation-guidance"
+            on:click={generateMesh}
+          >
+            {mesh ? 'Gerar / regenerar malha' : 'Gerar malha 2D'}
+          </button>
+          <p id="mesh-generation-guidance" class:mesh-blocked={meshGenerationBlockReason !== undefined} class="mesh-notice" role="status" aria-live="polite">
+            {meshGenerationBlockReason ?? 'Pronto para gerar; os nós serão reordenados automaticamente.'}
+          </p>
+          {#if mesh?.elements.length}
+            <p class="model-count" aria-label="Contagem de elementos da malha">
+              {mesh.elements.length} elemento(s) quadrilateral(is) de 4 nós
+            </p>
+          {/if}
+        </section>
+        <section aria-labelledby="analysis-readiness-heading">
+          <h2 id="analysis-readiness-heading">Prontidão para análise</h2>
+          <p
+            id="analysis-readiness-status"
+            class:readiness-ready={analysisReadiness.ready}
+            class:readiness-blocked={!analysisReadiness.ready}
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            {analysisReadiness.ready ? 'Modelo pronto para análise.' : `${analysisReadiness.issues.length} problema(s) impedem a análise.`}
+          </p>
+          <ul id="analysis-readiness-issues" class="readiness-issues">
+            {#each analysisReadiness.issues as issue (issue.code + issue.message)}
+              <li>{issue.message}</li>
+            {/each}
+            {#if analysisReadiness.ready}
+              <li>Todos os requisitos mínimos de completude foram atendidos.</li>
+            {/if}
+          </ul>
+          {#if analysisServiceError}
+            <p class="analysis-message analysis-failed" role="alert">{analysisServiceError}</p>
+          {:else if analysisUiState}
+            <div class="analysis-message" role="status" aria-live="polite" aria-atomic="true">
+              <p>{analysisUiState.message}</p>
+              {#if analysisUiState.status === 'running' || analysisUiState.status === 'cancelling'}
+                <progress max="100" value={analysisUiState.progress} aria-label="Progresso da análise">
+                  {analysisUiState.progress}%
+                </progress>
+                {#if analysisService.supportsCancellation}
+                  <button type="button" disabled={analysisUiState.status === 'cancelling'} on:click={cancelAnalysis}>
+                    {analysisUiState.status === 'cancelling' ? 'Cancelando…' : 'Cancelar análise'}
+                  </button>
+                {/if}
+              {/if}
+            </div>
+          {/if}
+        </section>
+      {/if}
       <section aria-labelledby="results-heading">
         <h2 id="results-heading">Resultados</h2>
         {#if importedResults}
@@ -1574,6 +1594,14 @@
               <span class="demo-badge">Dados de demonstração</span>
             {/if}
           </div>
+        {:else if appMode === 'results'}
+          <p class="mesh-notice">
+            {analysisUiState?.status === 'completed'
+              ? 'Análise concluída com sucesso. Os resultados de visualização ficam disponíveis nesta área após a importação ou emissão do relatório final.'
+              : 'Modo de visualização de resultados ativado. Carregue um arquivo de resultados para inspecionar os valores e a deformada.'}
+          </p>
+        {/if}
+        {#if importedResults}
           <label class="toggle-row">
             <input type="checkbox" bind:checked={showDeformedShape} />
             <span>Mostrar deformada</span>
