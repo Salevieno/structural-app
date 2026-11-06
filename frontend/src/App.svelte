@@ -663,8 +663,23 @@
 
   const applyImportedResults = async (file: File): Promise<void> => {
     try {
+      const previousNodeCount = nodes.length;
       analysisUiState = undefined;
-      const outcome = await resultsImportService.importFile(file, nodes.length);
+      importedResults = undefined;
+      nodes = [];
+      elements = [];
+      mesh = undefined;
+      materials = [];
+      sections = [];
+      nodalLoads = [];
+      prescribedDisplacements = [];
+      nodalSupports = [];
+      selectedNodeId = undefined;
+      selectedElementId = undefined;
+      connectionNodeIds = [];
+      activeTool = 'select';
+
+      const outcome = await resultsImportService.importFile(file, previousNodeCount);
       if (!outcome.valid || !outcome.data) {
         resultsImportStatus = 'error';
         resultsImportMessage = outcome.message;
@@ -676,15 +691,15 @@
       }
 
       importedResults = outcome.data;
-      activeTool = 'select';
       resultsImportStatus = 'ready';
       const maxDisplacement = importedResults.summary?.maxDisplacementMm ?? 'N/D';
       resultsImportMessage = `Resultados importados: ${importedResults.analysisId} • ${importedResults.nodes.length} nós • deslocamento máximo ${maxDisplacement}`;
-      logger.info('results.import.completed', 'Arquivo de resultados validado e exibido sobre o modelo atual', {
+      logger.info('results.import.completed', 'Arquivo de resultados validado e exibido em modo de visualização', {
         analysisId: importedResults.analysisId,
         nodeCount: importedResults.nodes.length,
         status: importedResults.status,
         projectId: importedResults.projectId,
+        clearedPreviousModel: previousNodeCount > 0,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
