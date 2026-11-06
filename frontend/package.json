@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.app.json",
-    "test": "node --test src/lib/domain/cartesianMesh.test.mjs src/lib/domain/degreesOfFreedom.test.mjs src/lib/services/analysis/analysisService.test.mjs"
+    "test": "node --test src/lib/domain/cartesianMesh.test.mjs src/lib/domain/degreesOfFreedom.test.mjs src/lib/services/analysis/analysisService.test.mjs src/lib/services/modelImport/modelImport.test.mjs src/lib/services/resultsImport/resultsImport.test.mjs"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.0",

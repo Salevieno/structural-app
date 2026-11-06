@@ -38,6 +38,11 @@
     type AnalysisService,
     type AnalysisUiState,
   } from './lib/services/analysis';
+  import {
+    createResultsImportService,
+    type StructuralResultsDocument,
+  } from './lib/services/resultsImport';
+  import { createModelImportService } from './lib/services/modelImport';
   import SceneViewport from './lib/viewport/SceneViewport.svelte';
   import type { CameraView } from './lib/viewport/types';
   import type { Position3D, WorkPlane } from './lib/viewport/workPlane';
@@ -162,6 +167,15 @@
   let analysisServiceReady = false;
   let analysisServiceError = '';
   let analysisUiState: AnalysisUiState | undefined;
+  let modelImportService = createModelImportService();
+  let resultsImportService = createResultsImportService();
+  let modelFileInput: HTMLInputElement | undefined;
+  let resultsFileInput: HTMLInputElement | undefined;
+  let importedResults: StructuralResultsDocument | undefined;
+  let resultsImportStatus: 'idle' | 'ready' | 'error' = 'idle';
+  let resultsImportMessage = 'Nenhum arquivo de resultados importado.';
+  let modelImportStatus: 'idle' | 'ready' | 'error' = 'idle';
+  let modelImportMessage = 'Nenhum arquivo de modelo importado.';
   let analysisReadiness = validateModelReadiness({
     nodes,
     elements,
@@ -562,6 +576,133 @@
       const message = error instanceof Error ? error.message : String(error);
       analysisServiceError = `Serviço de análise indisponível: ${message}`;
       logger.error('analysis.service.initialization.failed', 'Falha ao preparar o serviço de análise', {}, error instanceof Error ? error : new Error(message));
+    }
+  };
+
+  const handleModelFileSelection = async (event: Event): Promise<void> => {
+    const input = event.currentTarget;
+    if (!(input instanceof HTMLInputElement)) {
+      return;
+    }
+
+    const file = input.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    try {
+      const outcome = await modelImportService.importFile(file);
+      if (!outcome.valid || !outcome.data) {
+        modelImportStatus = 'error';
+        modelImportMessage = outcome.message;
+        logger.warn('model.import.failed', outcome.message, {
+          file: file.name,
+          errors: outcome.errors,
+        });
+        input.value = '';
+        return;
+      }
+
+      const importedDocument = outcome.data;
+      const importedModel = importedDocument.model;
+      nodes = importedModel.nodes.map((node) => ({ ...node, position: { ...node.position } }));
+      elements = importedModel.lineElements.map((element) => ({
+        ...element,
+        nodeIds: [...element.nodeIds],
+      }));
+      mesh = importedModel.mesh
+        ? {
+            ...importedModel.mesh,
+            boundaryNodeIds: [...importedModel.mesh.boundaryNodeIds],
+            generatedNodeIds: [...importedModel.mesh.generatedNodeIds],
+            elements: importedModel.mesh.elements.map((element) => ({
+              ...element,
+              nodeIds: [...element.nodeIds],
+            })),
+          }
+        : undefined;
+      materials = importedModel.materials.map((material) => ({ ...material }));
+      sections = importedModel.sections.map((section) => ({ ...section }));
+      nodalLoads = importedModel.nodalLoads.map((load) => ({
+        ...load,
+        components: { ...load.components },
+      }));
+      prescribedDisplacements = importedModel.prescribedDisplacements.map((entry) => ({
+        ...entry,
+        components: { ...entry.components },
+        activeDofs: [...entry.activeDofs],
+      }));
+      nodalSupports = importedModel.nodalSupports.map((support) => ({
+        ...support,
+        restraints: { ...support.restraints },
+      }));
+      workPlane = importedDocument.activeWorkPlane ?? workPlane;
+      selectedNodeId = undefined;
+      selectedElementId = undefined;
+      connectionNodeIds = [];
+      modelImportStatus = 'ready';
+      modelImportMessage = `Modelo importado com sucesso: ${file.name}.`;
+      logger.info('model.import.completed', 'Arquivo de modelo validado e aplicado sobre o estado atual', {
+        file: file.name,
+        nodeCount: nodes.length,
+        elementCount: elements.length,
+        meshElementCount: mesh?.elements.length ?? 0,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      modelImportStatus = 'error';
+      modelImportMessage = `Falha ao importar o modelo: ${message}`;
+      logger.error('model.import.exception', 'Erro inesperado na importação do modelo', {
+        file: file.name,
+      }, error instanceof Error ? error : new Error(message));
+    } finally {
+      input.value = '';
+    }
+  };
+
+  const handleResultsFileSelection = async (event: Event): Promise<void> => {
+    const input = event.currentTarget;
+    if (!(input instanceof HTMLInputElement)) {
+      return;
+    }
+
+    const file = input.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    try {
+      const outcome = await resultsImportService.importFile(file, nodes.length);
+      if (!outcome.valid || !outcome.data) {
+        resultsImportStatus = 'error';
+        resultsImportMessage = outcome.message;
+        logger.warn('results.import.failed', outcome.message, {
+          file: file.name,
+          errors: outcome.errors,
+        });
+        input.value = '';
+        return;
+      }
+
+      importedResults = outcome.data;
+      resultsImportStatus = 'ready';
+      const maxDisplacement = importedResults.summary?.maxDisplacementMm ?? 'N/D';
+      resultsImportMessage = `Resultados importados: ${importedResults.analysisId} • ${importedResults.nodes.length} nós • deslocamento máximo ${maxDisplacement}`;
+      logger.info('results.import.completed', 'Arquivo de resultados validado e exibido sobre o modelo atual', {
+        analysisId: importedResults.analysisId,
+        nodeCount: importedResults.nodes.length,
+        status: importedResults.status,
+        projectId: importedResults.projectId,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      resultsImportStatus = 'error';
+      resultsImportMessage = `Falha ao importar os resultados: ${message}`;
+      logger.error('results.import.exception', 'Erro inesperado na importação de resultados', {
+        file: file.name,
+      }, error instanceof Error ? error : new Error(message));
+    } finally {
+      input.value = '';
     }
   };
 
@@ -1079,7 +1220,13 @@
     </div>
 
     <nav class="toolbar" aria-label="Ações gerais">
-      <button type="button">Arquivo</button>
+      <button
+        type="button"
+        on:click={() => modelFileInput?.click()}
+        aria-label="Importar arquivo de modelo"
+      >
+        Arquivo
+      </button>
       <button type="button">Editar</button>
       <button
         type="button"
@@ -1090,8 +1237,30 @@
       >
         {analysisUiState?.status === 'running' || analysisUiState?.status === 'cancelling' ? 'Análise em andamento' : 'Iniciar análise'}
       </button>
-      <button type="button">Resultados</button>
+      <button
+        type="button"
+        on:click={() => resultsFileInput?.click()}
+        aria-label="Importar arquivo de resultados"
+      >
+        Resultados
+      </button>
     </nav>
+    <input
+      bind:this={modelFileInput}
+      type="file"
+      accept=".json,application/json"
+      hidden
+      on:change={handleModelFileSelection}
+      aria-label="Selecionar arquivo de modelo em JSON"
+    />
+    <input
+      bind:this={resultsFileInput}
+      type="file"
+      accept=".json,application/json"
+      hidden
+      on:change={handleResultsFileSelection}
+      aria-label="Selecionar arquivo de resultados em JSON"
+    />
   </header>
 
   <div class="workspace" aria-label="Área principal do aplicativo">
@@ -1270,6 +1439,28 @@
               {/if}
             {/if}
           </div>
+        {/if}
+      </section>
+      <section aria-labelledby="results-heading">
+        <h2 id="results-heading">Resultados</h2>
+        {#if importedResults}
+          <p class="model-count">Status: {importedResults.status}</p>
+          <dl class="node-properties">
+            <div><dt>Análise</dt><dd>{importedResults.analysisId}</dd></div>
+            <div><dt>Nós</dt><dd>{importedResults.nodes.length}</dd></div>
+            <div><dt>Deslocamento máximo</dt><dd>{importedResults.summary?.maxDisplacementMm ?? 'N/D'} mm</dd></div>
+            <div><dt>Gerado em</dt><dd>{new Date(importedResults.generatedAt).toLocaleString('pt-BR')}</dd></div>
+          </dl>
+        {:else}
+          <div class="empty-state">Nenhum arquivo de resultados importado. Use o botão Resultados para carregar um JSON válido.</div>
+        {/if}
+        <p class:results-error={resultsImportStatus === 'error'} class="results-message">
+          {resultsImportMessage}
+        </p>
+        {#if modelImportStatus !== 'idle'}
+          <p class:results-error={modelImportStatus === 'error'} class="results-message">
+            {modelImportMessage}
+          </p>
         {/if}
       </section>
       <section>
@@ -2098,6 +2289,23 @@
     border-radius: 0.4rem;
     color: #cbd5e1;
     font-size: 0.75rem;
+  }
+
+  .results-message {
+    margin: 0;
+    padding: 0.55rem 0.65rem;
+    border: 1px solid #334155;
+    border-radius: 0.45rem;
+    background: rgba(15, 23, 42, 0.7);
+    color: #cbd5e1;
+    font-size: 0.73rem;
+    line-height: 1.5;
+  }
+
+  .results-error {
+    border-color: #7f1d1d;
+    background: rgba(127, 29, 29, 0.22);
+    color: #fecaca;
   }
 
   .model-feedback {
