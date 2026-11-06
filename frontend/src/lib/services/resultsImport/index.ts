@@ -1,7 +1,25 @@
 export type StructuralResultsStatus = 'running' | 'completed' | 'failed' | 'cancelled';
 
+export interface StructuralResultsDisplacement {
+  nodeId: string;
+  uxMm?: number;
+  uyMm?: number;
+  uzMm?: number;
+  txRad?: number;
+  tyRad?: number;
+  tzRad?: number;
+}
+
+export interface StructuralResultsPosition {
+  x: number;
+  y: number;
+  z: number;
+}
+
 export interface StructuralResultsNode {
   nodeId: string;
+  position?: StructuralResultsPosition;
+  displacement?: StructuralResultsDisplacement;
   uxMm?: number;
   uyMm?: number;
   uzMm?: number;
@@ -25,6 +43,7 @@ export interface StructuralResultsDocument {
   generatedAt: string;
   summary?: StructuralResultsSummary;
   nodes: StructuralResultsNode[];
+  displacements?: StructuralResultsDisplacement[];
   reactions?: Array<Record<string, number | string>>;
   elements?: Array<Record<string, number | string | boolean>>;
 }
@@ -40,7 +59,7 @@ export interface ResultsImportService {
   importFile(file: File, expectedNodeCount?: number): Promise<ResultsImportOutcome>;
 }
 
-const numericResultFields: Array<keyof StructuralResultsNode> = [
+const numericResultFields: Array<keyof StructuralResultsDisplacement> = [
   'uxMm',
   'uyMm',
   'uzMm',
@@ -94,9 +113,8 @@ export const parseResultsFile = (
     errors.push('O campo "nodes" deve ser um array.');
   }
 
-  if (Array.isArray(candidate.nodes) && typeof expectedNodeCount === 'number' && Number.isFinite(expectedNodeCount)) {
-    // A validação rígida contra o modelo atual foi removida do escopo desta etapa: a importação de resultados
-    // deve aceitar dados de outras estruturas e exibir apenas o resultado carregado sobre o modelo atual.
+  if (candidate.displacements !== undefined && candidate.displacements !== null && !Array.isArray(candidate.displacements)) {
+    errors.push('O campo "displacements" deve ser um array, quando informado.');
   }
 
   if (Array.isArray(candidate.nodes)) {
@@ -110,11 +128,48 @@ export const parseResultsFile = (
       const nodeId = typedNode.nodeId;
       if (typeof nodeId !== 'string' || nodeId.trim().length === 0) {
         errors.push(`O nó na posição ${index} não possui "nodeId" válido.`);
+        continue;
+      }
+
+      const position = typedNode.position;
+      if (position !== undefined && (typeof position !== 'object' || position === null || Array.isArray(position))) {
+        errors.push(`A posição do nó ${nodeId} deve ser um objeto com x, y e z.`);
+      }
+
+      if (position && typeof position === 'object' && !Array.isArray(position)) {
+        const positionRecord = position as Record<string, unknown>;
+        for (const axis of ['x', 'y', 'z']) {
+          if (!(axis in positionRecord) || !isFiniteNumber(positionRecord[axis])) {
+            errors.push(`A posição do nó ${nodeId} deve conter um valor numérico finito em "${axis}".`);
+          }
+        }
       }
 
       for (const field of numericResultFields) {
         if (field in typedNode && !isFiniteNumber(typedNode[field])) {
           errors.push(`O campo "${String(field)}" do nó ${String(nodeId ?? `#${index}`)} deve ser numérico finito.`);
+        }
+      }
+    }
+  }
+
+  if (Array.isArray(candidate.displacements)) {
+    for (const [index, displacement] of candidate.displacements.entries()) {
+      if (!displacement || typeof displacement !== 'object') {
+        errors.push(`O deslocamento na posição ${index} não é um objeto válido.`);
+        continue;
+      }
+
+      const typedNode = displacement as Record<string, unknown>;
+      const nodeId = typedNode.nodeId;
+      if (typeof nodeId !== 'string' || nodeId.trim().length === 0) {
+        errors.push(`O deslocamento na posição ${index} não possui "nodeId" válido.`);
+        continue;
+      }
+
+      for (const field of numericResultFields) {
+        if (field in typedNode && !isFiniteNumber(typedNode[field])) {
+          errors.push(`O campo "${String(field)}" do deslocamento ${nodeId} deve ser numérico finito.`);
         }
       }
     }

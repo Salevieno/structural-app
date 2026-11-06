@@ -43,6 +43,10 @@
     type StructuralResultsDocument,
   } from './lib/services/resultsImport';
   import { createModelImportService } from './lib/services/modelImport';
+  import {
+    buildDeformedNodePositions,
+    resolveResultDisplayScale,
+  } from './lib/domain/resultsVisualization';
   import SceneViewport from './lib/viewport/SceneViewport.svelte';
   import type { CameraView } from './lib/viewport/types';
   import type { Position3D, WorkPlane } from './lib/viewport/workPlane';
@@ -169,9 +173,13 @@
   let analysisUiState: AnalysisUiState | undefined;
   let modelImportService = createModelImportService();
   let resultsImportService = createResultsImportService();
-  let modelFileInput: HTMLInputElement | undefined;
-  let resultsFileInput: HTMLInputElement | undefined;
+  let fileInput: HTMLInputElement | undefined;
   let importedResults: StructuralResultsDocument | undefined;
+  let appMode: 'creation' | 'results' = 'creation';
+  let showDeformedShape = true;
+  let resultDisplayScale = 1;
+  let deformedResultNodes: Array<{ id: string; position: { x: number; y: number; z: number } }> = [];
+  let resultElements: Array<{ id: string; nodeIds: string[] }> = [];
   let resultsImportStatus: 'idle' | 'ready' | 'error' = 'idle';
   let resultsImportMessage = 'Nenhum arquivo de resultados importado.';
   let modelImportStatus: 'idle' | 'ready' | 'error' = 'idle';
@@ -579,17 +587,7 @@
     }
   };
 
-  const handleModelFileSelection = async (event: Event): Promise<void> => {
-    const input = event.currentTarget;
-    if (!(input instanceof HTMLInputElement)) {
-      return;
-    }
-
-    const file = input.files?.[0];
-    if (!file) {
-      return;
-    }
-
+  const applyImportedModel = async (file: File): Promise<void> => {
     try {
       const outcome = await modelImportService.importFile(file);
       if (!outcome.valid || !outcome.data) {
@@ -599,7 +597,6 @@
           file: file.name,
           errors: outcome.errors,
         });
-        input.value = '';
         return;
       }
 
@@ -655,22 +652,10 @@
       logger.error('model.import.exception', 'Erro inesperado na importação do modelo', {
         file: file.name,
       }, error instanceof Error ? error : new Error(message));
-    } finally {
-      input.value = '';
     }
   };
 
-  const handleResultsFileSelection = async (event: Event): Promise<void> => {
-    const input = event.currentTarget;
-    if (!(input instanceof HTMLInputElement)) {
-      return;
-    }
-
-    const file = input.files?.[0];
-    if (!file) {
-      return;
-    }
-
+  const applyImportedResults = async (file: File): Promise<void> => {
     try {
       const outcome = await resultsImportService.importFile(file, nodes.length);
       if (!outcome.valid || !outcome.data) {
@@ -680,7 +665,6 @@
           file: file.name,
           errors: outcome.errors,
         });
-        input.value = '';
         return;
       }
 
@@ -701,9 +685,126 @@
       logger.error('results.import.exception', 'Erro inesperado na importação de resultados', {
         file: file.name,
       }, error instanceof Error ? error : new Error(message));
+    }
+  };
+
+  const handleModelFileSelection = async (event: Event): Promise<void> => {
+    const input = event.currentTarget;
+    if (!(input instanceof HTMLInputElement)) {
+      return;
+    }
+
+    const file = input.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    try {
+      await applyImportedModel(file);
     } finally {
       input.value = '';
     }
+  };
+
+  const handleResultsFileSelection = async (event: Event): Promise<void> => {
+    const input = event.currentTarget;
+    if (!(input instanceof HTMLInputElement)) {
+      return;
+    }
+
+    const file = input.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    try {
+      await applyImportedResults(file);
+    } finally {
+      input.value = '';
+    }
+  };
+
+  const handleFileSelection = async (event: Event): Promise<void> => {
+    const input = event.currentTarget;
+    if (!(input instanceof HTMLInputElement)) {
+      return;
+    }
+
+    const file = input.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    try {
+      const text = await file.text();
+      const payload = JSON.parse(text) as unknown;
+      const schema = typeof payload === 'object' && payload !== null ? (payload as Record<string, unknown>).schema : undefined;
+
+      if (schema === 'structural-model') {
+        await applyImportedModel(file);
+      } else if (schema === 'structural-results') {
+        await applyImportedResults(file);
+      } else {
+        const modelOutcome = await modelImportService.importFile(file);
+        if (modelOutcome.valid && modelOutcome.data) {
+          await applyImportedModel(file);
+          return;
+        }
+
+        const resultsOutcome = await resultsImportService.importFile(file, nodes.length);
+        if (resultsOutcome.valid && resultsOutcome.data) {
+          await applyImportedResults(file);
+          return;
+        }
+
+        modelImportStatus = 'error';
+        modelImportMessage = modelOutcome.message || 'Arquivo inválido.';
+        resultsImportStatus = 'error';
+        resultsImportMessage = resultsOutcome.message || 'Arquivo inválido.';
+        logger.warn('file.import.failed', 'Arquivo não corresponde a um modelo nem a um conjunto de resultados', {
+          file: file.name,
+          modelErrors: modelOutcome.errors,
+          resultsErrors: resultsOutcome.errors,
+        });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      modelImportStatus = 'error';
+      modelImportMessage = `Falha ao carregar o arquivo: ${message}`;
+      resultsImportStatus = 'error';
+      resultsImportMessage = `Falha ao carregar o arquivo: ${message}`;
+      logger.error('file.import.exception', 'Erro inesperado na leitura do arquivo carregado', {
+        file: file.name,
+      }, error instanceof Error ? error : new Error(message));
+    } finally {
+      input.value = '';
+    }
+  };
+
+  const handleNewStructure = (): void => {
+    if (!window.confirm('Deseja iniciar uma nova estrutura? Todos os dados atuais serão removidos.')) {
+      return;
+    }
+
+    importedResults = undefined;
+    analysisUiState = undefined;
+    nodes = [];
+    elements = [];
+    mesh = undefined;
+    materials = [];
+    sections = [];
+    nodalLoads = [];
+    prescribedDisplacements = [];
+    nodalSupports = [];
+    selectedNodeId = undefined;
+    selectedElementId = undefined;
+    connectionNodeIds = [];
+    modelFeedback = 'Nova estrutura iniciada. Comece criando nós e elementos.';
+    modelImportStatus = 'idle';
+    modelImportMessage = 'Nenhum arquivo de modelo importado.';
+    resultsImportStatus = 'idle';
+    resultsImportMessage = 'Nenhum arquivo de resultados importado.';
+    logger.info('app.new_structure', 'Nova estrutura iniciada', { mode: 'creation' });
   };
 
   const handleElementNodePick = (nodeId: string): void => {
@@ -1210,6 +1311,37 @@
   });
 
   $: filteredLogs = logs.filter((entry) => logFilter === 'all' || entry.level === logFilter);
+  $: appMode = importedResults || analysisUiState?.status === 'completed' ? 'results' : 'creation';
+  $: resultDisplayScale = importedResults ? resolveResultDisplayScale(importedResults.summary?.maxDisplacementMm) : 1;
+  $: deformedResultNodes = buildDeformedNodePositions(
+    nodes,
+    importedResults?.nodes,
+    resultDisplayScale,
+    importedResults?.displacements,
+  );
+  $: resultElements = (importedResults?.elements ?? []).flatMap((element) => {
+    const record = element as Record<string, unknown>;
+    const rawNodeIds = record.nodeIds;
+    const nodeIds: string[] = Array.isArray(rawNodeIds)
+      ? rawNodeIds.flatMap((nodeId) => (typeof nodeId === 'string' ? [nodeId] : []))
+      : typeof record.nodeIdA === 'string' && typeof record.nodeIdB === 'string'
+        ? [String(record.nodeIdA), String(record.nodeIdB)]
+        : [];
+
+    if (nodeIds.length === 0) {
+      return [];
+    }
+
+    const sanitizedNodeIds = [...new Set(nodeIds)];
+    if (sanitizedNodeIds.length < 2) {
+      return [];
+    }
+
+    return [{ id: String(record.elementId ?? sanitizedNodeIds.join('-')), nodeIds: sanitizedNodeIds.slice(0, 4) }];
+  });
+  $: if (nodes.length === 0 && importedResults && importedResults.nodes.length > 0) {
+    modelFeedback = 'Resultados importados com sucesso. O arquivo contém posições finais dos nós e, por isso, a deformada pode ser renderizada independentemente do arquivo de inputs.';
+  }
 </script>
 
 <div class="app-shell" aria-label="Aplicação estrutural inicial">
@@ -1222,44 +1354,33 @@
     <nav class="toolbar" aria-label="Ações gerais">
       <button
         type="button"
-        on:click={() => modelFileInput?.click()}
-        aria-label="Importar arquivo de modelo"
+        on:click={() => fileInput?.click()}
+        aria-label="Carregar arquivo estrutural ou de resultados"
       >
-        Arquivo
+        Carregar arquivo
       </button>
-      <button type="button">Editar</button>
-      <button
-        type="button"
-        disabled={!analysisReadiness.ready || !analysisServiceReady || analysisUiState?.status === 'running' || analysisUiState?.status === 'cancelling'}
-        on:click={startAnalysis}
-        aria-describedby="analysis-readiness-status analysis-readiness-issues"
-        title={!analysisReadiness.ready ? 'Consulte os problemas de prontidão do modelo' : !analysisServiceReady ? 'Aguarde a inicialização do serviço de análise' : 'Iniciar análise'}
-      >
-        {analysisUiState?.status === 'running' || analysisUiState?.status === 'cancelling' ? 'Análise em andamento' : 'Iniciar análise'}
-      </button>
-      <button
-        type="button"
-        on:click={() => resultsFileInput?.click()}
-        aria-label="Importar arquivo de resultados"
-      >
-        Resultados
-      </button>
+      {#if appMode === 'results'}
+        <button type="button" on:click={handleNewStructure}>Nova estrutura</button>
+      {:else}
+        <button type="button">Editar</button>
+        <button
+          type="button"
+          disabled={!analysisReadiness.ready || !analysisServiceReady || analysisUiState?.status === 'running' || analysisUiState?.status === 'cancelling'}
+          on:click={startAnalysis}
+          aria-describedby="analysis-readiness-status analysis-readiness-issues"
+          title={!analysisReadiness.ready ? 'Consulte os problemas de prontidão do modelo' : !analysisServiceReady ? 'Aguarde a inicialização do serviço de análise' : 'Iniciar análise'}
+        >
+          {analysisUiState?.status === 'running' || analysisUiState?.status === 'cancelling' ? 'Análise em andamento' : 'Iniciar análise'}
+        </button>
+      {/if}
     </nav>
     <input
-      bind:this={modelFileInput}
+      bind:this={fileInput}
       type="file"
       accept=".json,application/json"
       hidden
-      on:change={handleModelFileSelection}
-      aria-label="Selecionar arquivo de modelo em JSON"
-    />
-    <input
-      bind:this={resultsFileInput}
-      type="file"
-      accept=".json,application/json"
-      hidden
-      on:change={handleResultsFileSelection}
-      aria-label="Selecionar arquivo de resultados em JSON"
+      on:change={handleFileSelection}
+      aria-label="Selecionar arquivo em JSON"
     />
   </header>
 
@@ -1359,6 +1480,9 @@
         {nodes}
         {elements}
         meshElements={mesh?.elements ?? []}
+        resultNodes={deformedResultNodes}
+        resultElements={resultElements}
+        showDeformedShape={showDeformedShape && importedResults !== undefined}
         {selectedNodeId}
         {selectedElementId}
         {connectionNodeIds}
@@ -1444,13 +1568,52 @@
       <section aria-labelledby="results-heading">
         <h2 id="results-heading">Resultados</h2>
         {#if importedResults}
-          <p class="model-count">Status: {importedResults.status}</p>
+          <div class="results-header">
+            <span class="result-status-badge">{importedResults.status}</span>
+            {#if importedResults.analysisId.toLowerCase().includes('demo') || importedResults.projectId.toLowerCase().includes('demo')}
+              <span class="demo-badge">Dados de demonstração</span>
+            {/if}
+          </div>
+          <label class="toggle-row">
+            <input type="checkbox" bind:checked={showDeformedShape} />
+            <span>Mostrar deformada</span>
+          </label>
           <dl class="node-properties">
             <div><dt>Análise</dt><dd>{importedResults.analysisId}</dd></div>
             <div><dt>Nós</dt><dd>{importedResults.nodes.length}</dd></div>
             <div><dt>Deslocamento máximo</dt><dd>{importedResults.summary?.maxDisplacementMm ?? 'N/D'} mm</dd></div>
+            <div><dt>Escala</dt><dd>{resultDisplayScale.toFixed(2)}×</dd></div>
+            <div><dt>Reações</dt><dd>{importedResults.reactions?.length ?? 0}</dd></div>
             <div><dt>Gerado em</dt><dd>{new Date(importedResults.generatedAt).toLocaleString('pt-BR')}</dd></div>
           </dl>
+          {#if importedResults.reactions?.length}
+            <div class="results-subsection">
+              <strong>Reações</strong>
+              <ul class="mini-list">
+                {#each importedResults.reactions.slice(0, 4) as reaction}
+                  <li>{reaction.nodeId ?? 'Nó'} · {Object.entries(reaction)
+                    .filter(([key]) => key !== 'nodeId')
+                    .slice(0, 2)
+                    .map(([key, value]) => `${key}: ${Number(value).toFixed(2)}`)
+                    .join(' · ') || 'Sem valores'}</li>
+                {/each}
+              </ul>
+            </div>
+          {/if}
+          {#if importedResults.elements?.length}
+            <div class="results-subsection">
+              <strong>Resultados por elemento</strong>
+              <ul class="mini-list">
+                {#each importedResults.elements.slice(0, 4) as element}
+                  <li>{element.elementId ?? 'Elemento'} · {Object.entries(element)
+                    .filter(([key]) => key !== 'elementId' && key !== 'type')
+                    .slice(0, 2)
+                    .map(([key, value]) => `${key}: ${Number(value).toFixed(2)}`)
+                    .join(' · ') || 'Sem valores'}</li>
+                {/each}
+              </ul>
+            </div>
+          {/if}
         {:else}
           <div class="empty-state">Nenhum arquivo de resultados importado. Use o botão Resultados para carregar um JSON válido.</div>
         {/if}
@@ -2033,6 +2196,63 @@
     margin: 0;
     color: #94a3b8;
     font-size: 0.78rem;
+  }
+
+  .results-header {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    align-items: center;
+  }
+
+  .result-status-badge,
+  .demo-badge {
+    display: inline-flex;
+    align-items: center;
+    min-height: 1.5rem;
+    padding: 0.2rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+
+  .result-status-badge {
+    background: rgba(34, 197, 94, 0.18);
+    border: 1px solid rgba(34, 197, 94, 0.4);
+    color: #86efac;
+  }
+
+  .demo-badge {
+    background: rgba(251, 191, 36, 0.12);
+    border: 1px solid rgba(251, 191, 36, 0.4);
+    color: #fcd34d;
+  }
+
+  .toggle-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    color: #cbd5e1;
+    font-size: 0.76rem;
+  }
+
+  .results-subsection {
+    display: grid;
+    gap: 0.35rem;
+    margin-top: 0.2rem;
+    color: #cbd5e1;
+    font-size: 0.72rem;
+  }
+
+  .mini-list {
+    display: grid;
+    gap: 0.25rem;
+    margin: 0;
+    padding-left: 1rem;
+    color: #cbd5e1;
+    word-break: break-word;
   }
 
   .readiness-blocked,
