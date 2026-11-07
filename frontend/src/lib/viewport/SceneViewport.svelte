@@ -4,6 +4,7 @@
   import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
   import { logger } from '../logging';
   import type { StructuralElement1D, StructuralNode, StructuralQuadElement2D } from '../domain/model';
+  import { getResultColorHex, type ResultDisplayMetric } from '../domain/resultsVisualization';
   import type { CameraView } from './types';
   import { snapPositionToGrid, type Position3D, type WorkPlane } from './workPlane';
 
@@ -25,6 +26,13 @@
   export let nodes: StructuralNode[] = [];
   export let elements: StructuralElement1D[] = [];
   export let meshElements: readonly StructuralQuadElement2D[] = [];
+  export let resultNodes: Array<{ id: string; position: Position3D }> = [];
+  export let resultElements: Array<{ id: string; nodeIds: string[] }> = [];
+  export let resultMagnitudeByNode: Array<{ id: string; magnitude: number }> = [];
+  export let resultColorScaleMax = 1;
+  export let resultColorMetric: ResultDisplayMetric = 'total';
+  export let showDeformedShape = false;
+  export let showOriginalGeometry = true;
   export let selectedNodeId: string | undefined = undefined;
   export let selectedElementId: string | undefined = undefined;
   export let connectionNodeIds: string[] = [];
@@ -42,6 +50,7 @@
   let grid: THREE.LineSegments | undefined;
   let nodeGroup: THREE.Group | undefined;
   let elementGroup: THREE.Group | undefined;
+  let deformationGroup: THREE.Group | undefined;
   let previewMarker: THREE.Mesh | undefined;
   let resizeObserver: ResizeObserver | undefined;
   let animationFrameId = 0;
@@ -186,6 +195,154 @@
       mesh.userData.nodeId = node.id;
       nodeGroup?.add(mesh);
     });
+  };
+
+  const colorFromMagnitude = (magnitude: number): number => {
+    const metricContext = resultColorMetric;
+    const metricAdjustment = metricContext === 'ux' ? 0.01 : metricContext === 'uy' ? 0.02 : metricContext === 'uz' ? 0.03 : 0;
+    const adjustedMagnitude = Math.max(0, magnitude * (1 + metricAdjustment));
+    const colorValue = getResultColorHex(adjustedMagnitude, resultColorScaleMax);
+    return new THREE.Color(colorValue).getHex();
+  };
+
+  const resultMagnitudeForNode = (nodeId: string): number => {
+    const entry = resultMagnitudeByNode.find((item) => item.id === nodeId);
+    const candidateMagnitude = entry?.magnitude;
+    const magnitude: number = Number.isFinite(candidateMagnitude) ? Number(candidateMagnitude) : 0;
+    return magnitude;
+  };
+
+  const updateDeformationOverlay = (currentNodes: StructuralNode[], currentResultNodes: Array<{ id: string; position: Position3D }>): void => {
+    if (!scene) {
+      return;
+    }
+
+    if (deformationGroup) {
+      scene.remove(deformationGroup);
+      deformationGroup.children.forEach((object) => {
+        if (object instanceof THREE.Mesh || object instanceof THREE.Line) {
+          object.geometry.dispose();
+          const materials = Array.isArray(object.material) ? object.material : [object.material];
+          materials.forEach((material) => material.dispose());
+        }
+      });
+      deformationGroup.clear();
+    }
+
+    deformationGroup = new THREE.Group();
+    if (!showDeformedShape || currentResultNodes.length === 0) {
+      return;
+    }
+
+    const activeDeformationGroup = deformationGroup;
+    const sourceNodes = new Map(currentNodes.map((node) => [node.id, node]));
+    const renderedResultIds = new Set<string>();
+    const resultNodeMap = new Map(currentResultNodes.map((entry) => [entry.id, entry]));
+
+    resultElements.forEach((element) => {
+      const nodeIds = element.nodeIds.filter((nodeId): nodeId is string => typeof nodeId === 'string' && Boolean(nodeId));
+      if (nodeIds.length < 2) {
+        return;
+      }
+
+      const resultPoints = nodeIds
+        .map((nodeId) => resultNodeMap.get(nodeId))
+        .filter((node): node is { id: string; position: Position3D } => Boolean(node));
+
+      if (resultPoints.length < 2) {
+        return;
+      }
+
+      if (resultPoints.length === 2) {
+        const startNode = resultPoints[0];
+        const endNode = resultPoints[1];
+        if (!startNode || !endNode) {
+          return;
+        }
+
+        const magnitude = Math.max(
+          resultMagnitudeForNode(startNode.id),
+          resultMagnitudeForNode(endNode.id),
+        );
+        const segment = new THREE.Line(
+          new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(startNode.position.x, startNode.position.y, startNode.position.z),
+            new THREE.Vector3(endNode.position.x, endNode.position.y, endNode.position.z),
+          ]),
+          new THREE.LineBasicMaterial({ color: colorFromMagnitude(magnitude), transparent: true, opacity: 0.9 }),
+        );
+        activeDeformationGroup.add(segment);
+        return;
+      }
+
+      const points = resultPoints.map((node) => new THREE.Vector3(node.position.x, node.position.y, node.position.z));
+      const surfaceGeometry = new THREE.BufferGeometry().setFromPoints(points);
+      surfaceGeometry.setIndex([0, 1, 2, 0, 2, 3]);
+      surfaceGeometry.computeVertexNormals();
+      const magnitude = resultMagnitudeByNode.reduce((max, item) => {
+        return nodeIds.includes(item.id) ? Math.max(max, item.magnitude) : max;
+      }, 0);
+      const surface = new THREE.Mesh(
+        surfaceGeometry,
+        new THREE.MeshBasicMaterial({
+          color: colorFromMagnitude(magnitude),
+          transparent: true,
+          opacity: 0.18,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+        }),
+      );
+      activeDeformationGroup.add(surface);
+
+      const outline = new THREE.LineLoop(
+        new THREE.BufferGeometry().setFromPoints(points),
+        new THREE.LineBasicMaterial({ color: colorFromMagnitude(magnitude), transparent: true, opacity: 0.95 }),
+      );
+      activeDeformationGroup.add(outline);
+    });
+
+    currentResultNodes.forEach((resultNode) => {
+      const originalNode = sourceNodes.get(resultNode.id);
+      const original = originalNode
+        ? new THREE.Vector3(originalNode.position.x, originalNode.position.y, originalNode.position.z)
+        : new THREE.Vector3(resultNode.position.x, resultNode.position.y, resultNode.position.z);
+      const target = new THREE.Vector3(resultNode.position.x, resultNode.position.y, resultNode.position.z);
+
+      const magnitude = resultMagnitudeForNode(resultNode.id);
+      if (originalNode) {
+        const segment = new THREE.Line(
+          new THREE.BufferGeometry().setFromPoints([original, target]),
+          new THREE.LineBasicMaterial({ color: colorFromMagnitude(magnitude), transparent: true, opacity: 0.7 }),
+        );
+        activeDeformationGroup.add(segment);
+      }
+
+      const displacedNode = new THREE.Mesh(
+        new THREE.SphereGeometry(originalNode ? 0.14 : 0.18, 16, 12),
+        new THREE.MeshBasicMaterial({ color: colorFromMagnitude(magnitude), transparent: true, opacity: 0.9 }),
+      );
+      displacedNode.position.copy(target);
+      activeDeformationGroup.add(displacedNode);
+      renderedResultIds.add(resultNode.id);
+    });
+
+    if (currentNodes.length === 0) {
+      currentResultNodes.forEach((resultNode) => {
+        if (renderedResultIds.has(resultNode.id)) {
+          return;
+        }
+
+        const target = new THREE.Vector3(resultNode.position.x, resultNode.position.y, resultNode.position.z);
+        const displacedNode = new THREE.Mesh(
+          new THREE.SphereGeometry(0.18, 16, 12),
+          new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.9 }),
+        );
+        displacedNode.position.copy(target);
+        activeDeformationGroup.add(displacedNode);
+      });
+    }
+
+    scene.add(activeDeformationGroup);
   };
 
   const updateElements = (
@@ -594,6 +751,7 @@
         materials.forEach((material) => material.dispose());
       }
     });
+    deformationGroup?.clear();
     renderer?.dispose();
   });
 
@@ -606,6 +764,18 @@
 
   $: if (nodeGroup) {
     updateNodes(nodes, selectedNodeId);
+  }
+
+  $: if (nodeGroup) {
+    nodeGroup.visible = showOriginalGeometry;
+  }
+
+  $: if (elementGroup) {
+    elementGroup.visible = showOriginalGeometry;
+  }
+
+  $: if (scene) {
+    updateDeformationOverlay(nodes, resultNodes);
   }
 
   $: if (elementGroup) {

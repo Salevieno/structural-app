@@ -43,6 +43,13 @@
     type StructuralResultsDocument,
   } from './lib/services/resultsImport';
   import { createModelImportService } from './lib/services/modelImport';
+  import {
+    buildDeformedNodePositions,
+    getResultColorScaleGradientCss,
+    getResultDisplacementMagnitudeMm,
+    resolveResultDisplayScale,
+    type ResultDisplayMetric,
+  } from './lib/domain/resultsVisualization';
   import SceneViewport from './lib/viewport/SceneViewport.svelte';
   import type { CameraView } from './lib/viewport/types';
   import type { Position3D, WorkPlane } from './lib/viewport/workPlane';
@@ -169,9 +176,17 @@
   let analysisUiState: AnalysisUiState | undefined;
   let modelImportService = createModelImportService();
   let resultsImportService = createResultsImportService();
-  let modelFileInput: HTMLInputElement | undefined;
-  let resultsFileInput: HTMLInputElement | undefined;
+  let fileInput: HTMLInputElement | undefined;
   let importedResults: StructuralResultsDocument | undefined;
+  let appMode: 'creation' | 'results' = 'creation';
+  let showDeformedShape = true;
+  let showOriginalGeometry = true;
+  let resultDisplayMetric: ResultDisplayMetric = 'total';
+  let resultDisplayScale = 1;
+  let resultColorScaleMax = 1;
+  let resultMagnitudeByNode: Array<{ id: string; magnitude: number }> = [];
+  let deformedResultNodes: Array<{ id: string; position: { x: number; y: number; z: number } }> = [];
+  let resultElements: Array<{ id: string; nodeIds: string[] }> = [];
   let resultsImportStatus: 'idle' | 'ready' | 'error' = 'idle';
   let resultsImportMessage = 'Nenhum arquivo de resultados importado.';
   let modelImportStatus: 'idle' | 'ready' | 'error' = 'idle';
@@ -304,6 +319,9 @@
   };
 
   const setTool = (toolId: ToolType): void => {
+    if (appMode === 'results') {
+      return;
+    }
     activeTool = toolId;
     if (toolId !== 'elements' && connectionNodeIds.length > 0) {
       connectionNodeIds = [];
@@ -579,18 +597,10 @@
     }
   };
 
-  const handleModelFileSelection = async (event: Event): Promise<void> => {
-    const input = event.currentTarget;
-    if (!(input instanceof HTMLInputElement)) {
-      return;
-    }
-
-    const file = input.files?.[0];
-    if (!file) {
-      return;
-    }
-
+  const applyImportedModel = async (file: File): Promise<void> => {
     try {
+      importedResults = undefined;
+      analysisUiState = undefined;
       const outcome = await modelImportService.importFile(file);
       if (!outcome.valid || !outcome.data) {
         modelImportStatus = 'error';
@@ -599,7 +609,6 @@
           file: file.name,
           errors: outcome.errors,
         });
-        input.value = '';
         return;
       }
 
@@ -637,6 +646,7 @@
         restraints: { ...support.restraints },
       }));
       workPlane = importedDocument.activeWorkPlane ?? workPlane;
+      activeTool = 'select';
       selectedNodeId = undefined;
       selectedElementId = undefined;
       connectionNodeIds = [];
@@ -655,6 +665,72 @@
       logger.error('model.import.exception', 'Erro inesperado na importação do modelo', {
         file: file.name,
       }, error instanceof Error ? error : new Error(message));
+    }
+  };
+
+  const applyImportedResults = async (file: File): Promise<void> => {
+    try {
+      const previousNodeCount = nodes.length;
+      analysisUiState = undefined;
+      importedResults = undefined;
+      nodes = [];
+      elements = [];
+      mesh = undefined;
+      materials = [];
+      sections = [];
+      nodalLoads = [];
+      prescribedDisplacements = [];
+      nodalSupports = [];
+      selectedNodeId = undefined;
+      selectedElementId = undefined;
+      connectionNodeIds = [];
+      activeTool = 'select';
+
+      const outcome = await resultsImportService.importFile(file, previousNodeCount);
+      if (!outcome.valid || !outcome.data) {
+        resultsImportStatus = 'error';
+        resultsImportMessage = outcome.message;
+        logger.warn('results.import.failed', outcome.message, {
+          file: file.name,
+          errors: outcome.errors,
+        });
+        return;
+      }
+
+      importedResults = outcome.data;
+      resultsImportStatus = 'ready';
+      const maxDisplacement = importedResults.summary?.maxDisplacementMm ?? 'N/D';
+      resultsImportMessage = `Resultados importados: ${importedResults.analysisId} • ${importedResults.nodes.length} nós • deslocamento máximo ${maxDisplacement}`;
+      logger.info('results.import.completed', 'Arquivo de resultados validado e exibido em modo de visualização', {
+        analysisId: importedResults.analysisId,
+        nodeCount: importedResults.nodes.length,
+        status: importedResults.status,
+        projectId: importedResults.projectId,
+        clearedPreviousModel: previousNodeCount > 0,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      resultsImportStatus = 'error';
+      resultsImportMessage = `Falha ao importar os resultados: ${message}`;
+      logger.error('results.import.exception', 'Erro inesperado na importação de resultados', {
+        file: file.name,
+      }, error instanceof Error ? error : new Error(message));
+    }
+  };
+
+  const handleModelFileSelection = async (event: Event): Promise<void> => {
+    const input = event.currentTarget;
+    if (!(input instanceof HTMLInputElement)) {
+      return;
+    }
+
+    const file = input.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    try {
+      await applyImportedModel(file);
     } finally {
       input.value = '';
     }
@@ -672,38 +748,100 @@
     }
 
     try {
-      const outcome = await resultsImportService.importFile(file, nodes.length);
-      if (!outcome.valid || !outcome.data) {
-        resultsImportStatus = 'error';
-        resultsImportMessage = outcome.message;
-        logger.warn('results.import.failed', outcome.message, {
-          file: file.name,
-          errors: outcome.errors,
-        });
-        input.value = '';
-        return;
-      }
+      await applyImportedResults(file);
+    } finally {
+      input.value = '';
+    }
+  };
 
-      importedResults = outcome.data;
-      resultsImportStatus = 'ready';
-      const maxDisplacement = importedResults.summary?.maxDisplacementMm ?? 'N/D';
-      resultsImportMessage = `Resultados importados: ${importedResults.analysisId} • ${importedResults.nodes.length} nós • deslocamento máximo ${maxDisplacement}`;
-      logger.info('results.import.completed', 'Arquivo de resultados validado e exibido sobre o modelo atual', {
-        analysisId: importedResults.analysisId,
-        nodeCount: importedResults.nodes.length,
-        status: importedResults.status,
-        projectId: importedResults.projectId,
-      });
+  const handleFileSelection = async (event: Event): Promise<void> => {
+    const input = event.currentTarget;
+    if (!(input instanceof HTMLInputElement)) {
+      return;
+    }
+
+    const file = input.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    try {
+      const text = await file.text();
+      const payload = JSON.parse(text) as unknown;
+      const schema = typeof payload === 'object' && payload !== null ? (payload as Record<string, unknown>).schema : undefined;
+
+      if (schema === 'structural-model') {
+        await applyImportedModel(file);
+      } else if (schema === 'structural-results') {
+        await applyImportedResults(file);
+      } else {
+        const modelOutcome = await modelImportService.importFile(file);
+        if (modelOutcome.valid && modelOutcome.data) {
+          await applyImportedModel(file);
+          return;
+        }
+
+        const resultsOutcome = await resultsImportService.importFile(file, nodes.length);
+        if (resultsOutcome.valid && resultsOutcome.data) {
+          await applyImportedResults(file);
+          return;
+        }
+
+        modelImportStatus = 'error';
+        modelImportMessage = modelOutcome.message || 'Arquivo inválido.';
+        resultsImportStatus = 'error';
+        resultsImportMessage = resultsOutcome.message || 'Arquivo inválido.';
+        logger.warn('file.import.failed', 'Arquivo não corresponde a um modelo nem a um conjunto de resultados', {
+          file: file.name,
+          modelErrors: modelOutcome.errors,
+          resultsErrors: resultsOutcome.errors,
+        });
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      modelImportStatus = 'error';
+      modelImportMessage = `Falha ao carregar o arquivo: ${message}`;
       resultsImportStatus = 'error';
-      resultsImportMessage = `Falha ao importar os resultados: ${message}`;
-      logger.error('results.import.exception', 'Erro inesperado na importação de resultados', {
+      resultsImportMessage = `Falha ao carregar o arquivo: ${message}`;
+      logger.error('file.import.exception', 'Erro inesperado na leitura do arquivo carregado', {
         file: file.name,
       }, error instanceof Error ? error : new Error(message));
     } finally {
       input.value = '';
     }
+  };
+
+  const handleNewStructure = (): void => {
+    if (!window.confirm('Deseja iniciar uma nova estrutura? Todos os dados atuais serão removidos.')) {
+      return;
+    }
+
+    importedResults = undefined;
+    analysisUiState = undefined;
+    resultDisplayMetric = 'total';
+    resultDisplayScale = 1;
+    resultColorScaleMax = 1;
+    resultMagnitudeByNode = [];
+    deformedResultNodes = [];
+    resultElements = [];
+    nodes = [];
+    elements = [];
+    mesh = undefined;
+    materials = [];
+    sections = [];
+    nodalLoads = [];
+    prescribedDisplacements = [];
+    nodalSupports = [];
+    selectedNodeId = undefined;
+    selectedElementId = undefined;
+    connectionNodeIds = [];
+    activeTool = 'select';
+    modelFeedback = 'Nova estrutura iniciada. Comece criando nós e elementos.';
+    modelImportStatus = 'idle';
+    modelImportMessage = 'Nenhum arquivo de modelo importado.';
+    resultsImportStatus = 'idle';
+    resultsImportMessage = 'Nenhum arquivo de resultados importado.';
+    logger.info('app.new_structure', 'Nova estrutura iniciada', { mode: 'creation' });
   };
 
   const handleElementNodePick = (nodeId: string): void => {
@@ -1210,6 +1348,78 @@
   });
 
   $: filteredLogs = logs.filter((entry) => logFilter === 'all' || entry.level === logFilter);
+  $: appMode = importedResults || analysisUiState?.status === 'completed' ? 'results' : 'creation';
+  $: if (appMode === 'results') {
+    activeTool = 'select';
+  }
+  $: resultColorScaleMax = importedResults
+    ? Math.max(
+        1,
+        ...((importedResults.displacements ?? importedResults.nodes ?? []).map((entry) => {
+          const candidate = ('nodeId' in entry && typeof entry.nodeId === 'string' ? entry : undefined) as
+            | {
+                nodeId?: string;
+                uxMm?: number | undefined;
+                uyMm?: number | undefined;
+                uzMm?: number | undefined;
+                displacement?: { uxMm?: number | undefined; uyMm?: number | undefined; uzMm?: number | undefined };
+              }
+            | undefined;
+          const displacement = candidate
+            ? {
+                uxMm: candidate.uxMm ?? candidate.displacement?.uxMm ?? undefined,
+                uyMm: candidate.uyMm ?? candidate.displacement?.uyMm ?? undefined,
+                uzMm: candidate.uzMm ?? candidate.displacement?.uzMm ?? undefined,
+              }
+            : undefined;
+          return getResultDisplacementMagnitudeMm(displacement, resultDisplayMetric);
+        })),
+      )
+    : 1;
+  $: resultDisplayScale = importedResults ? resolveResultDisplayScale(resultColorScaleMax) : 1;
+  $: resultMagnitudeByNode = (importedResults?.nodes ?? []).map((node) => {
+    const displacementByNode = new Map(
+      (importedResults?.displacements ?? []).map((entry) => [entry.nodeId, entry]),
+    );
+    const displacement = displacementByNode.get(node.nodeId) ?? {
+      uxMm: node.uxMm ?? node.displacement?.uxMm ?? undefined,
+      uyMm: node.uyMm ?? node.displacement?.uyMm ?? undefined,
+      uzMm: node.uzMm ?? node.displacement?.uzMm ?? undefined,
+    };
+    return {
+      id: node.nodeId,
+      magnitude: getResultDisplacementMagnitudeMm(displacement, resultDisplayMetric),
+    };
+  });
+  $: deformedResultNodes = buildDeformedNodePositions(
+    nodes,
+    importedResults?.nodes,
+    resultDisplayScale,
+    importedResults?.displacements,
+  );
+  $: resultElements = (importedResults?.elements ?? []).flatMap((element) => {
+    const record = element as Record<string, unknown>;
+    const rawNodeIds = record.nodeIds;
+    const nodeIds: string[] = Array.isArray(rawNodeIds)
+      ? rawNodeIds.flatMap((nodeId) => (typeof nodeId === 'string' ? [nodeId] : []))
+      : typeof record.nodeIdA === 'string' && typeof record.nodeIdB === 'string'
+        ? [String(record.nodeIdA), String(record.nodeIdB)]
+        : [];
+
+    if (nodeIds.length === 0) {
+      return [];
+    }
+
+    const sanitizedNodeIds = [...new Set(nodeIds)];
+    if (sanitizedNodeIds.length < 2) {
+      return [];
+    }
+
+    return [{ id: String(record.elementId ?? sanitizedNodeIds.join('-')), nodeIds: sanitizedNodeIds.slice(0, 4) }];
+  });
+  $: if (nodes.length === 0 && importedResults && importedResults.nodes.length > 0) {
+    modelFeedback = 'Resultados importados com sucesso. O arquivo contém posições finais dos nós e, por isso, a deformada pode ser renderizada independentemente do arquivo de inputs.';
+  }
 </script>
 
 <div class="app-shell" aria-label="Aplicação estrutural inicial">
@@ -1222,65 +1432,56 @@
     <nav class="toolbar" aria-label="Ações gerais">
       <button
         type="button"
-        on:click={() => modelFileInput?.click()}
-        aria-label="Importar arquivo de modelo"
+        on:click={() => fileInput?.click()}
+        aria-label="Carregar arquivo estrutural ou de resultados"
       >
-        Arquivo
+        Carregar arquivo
       </button>
-      <button type="button">Editar</button>
-      <button
-        type="button"
-        disabled={!analysisReadiness.ready || !analysisServiceReady || analysisUiState?.status === 'running' || analysisUiState?.status === 'cancelling'}
-        on:click={startAnalysis}
-        aria-describedby="analysis-readiness-status analysis-readiness-issues"
-        title={!analysisReadiness.ready ? 'Consulte os problemas de prontidão do modelo' : !analysisServiceReady ? 'Aguarde a inicialização do serviço de análise' : 'Iniciar análise'}
-      >
-        {analysisUiState?.status === 'running' || analysisUiState?.status === 'cancelling' ? 'Análise em andamento' : 'Iniciar análise'}
-      </button>
-      <button
-        type="button"
-        on:click={() => resultsFileInput?.click()}
-        aria-label="Importar arquivo de resultados"
-      >
-        Resultados
-      </button>
+      {#if appMode === 'results'}
+        <button type="button" on:click={handleNewStructure}>Nova estrutura</button>
+      {:else}
+        <button type="button">Editar</button>
+        <button
+          type="button"
+          disabled={!analysisReadiness.ready || !analysisServiceReady || analysisUiState?.status === 'running' || analysisUiState?.status === 'cancelling'}
+          on:click={startAnalysis}
+          aria-describedby="analysis-readiness-status analysis-readiness-issues"
+          title={!analysisReadiness.ready ? 'Consulte os problemas de prontidão do modelo' : !analysisServiceReady ? 'Aguarde a inicialização do serviço de análise' : 'Iniciar análise'}
+        >
+          {analysisUiState?.status === 'running' || analysisUiState?.status === 'cancelling' ? 'Análise em andamento' : 'Iniciar análise'}
+        </button>
+      {/if}
     </nav>
     <input
-      bind:this={modelFileInput}
+      bind:this={fileInput}
       type="file"
       accept=".json,application/json"
       hidden
-      on:change={handleModelFileSelection}
-      aria-label="Selecionar arquivo de modelo em JSON"
-    />
-    <input
-      bind:this={resultsFileInput}
-      type="file"
-      accept=".json,application/json"
-      hidden
-      on:change={handleResultsFileSelection}
-      aria-label="Selecionar arquivo de resultados em JSON"
+      on:change={handleFileSelection}
+      aria-label="Selecionar arquivo em JSON"
     />
   </header>
 
   <div class="workspace" aria-label="Área principal do aplicativo">
-    <aside class="tool-panel" aria-label="Barra de ferramentas">
-      <h2>Ferramentas</h2>
-      <ul>
-        {#each tools as tool}
-          <li>
-            <button
-              type="button"
-              class:active={tool.id === activeTool}
-              aria-pressed={tool.id === activeTool}
-              on:click={() => setTool(tool.id)}
-            >
-              {tool.label}
-            </button>
-          </li>
-        {/each}
-      </ul>
-    </aside>
+    {#if appMode !== 'results'}
+      <aside class="tool-panel" aria-label="Barra de ferramentas">
+        <h2>Ferramentas</h2>
+        <ul>
+          {#each tools as tool}
+            <li>
+              <button
+                type="button"
+                class:active={tool.id === activeTool}
+                aria-pressed={tool.id === activeTool}
+                on:click={() => setTool(tool.id)}
+              >
+                {tool.label}
+              </button>
+            </li>
+          {/each}
+        </ul>
+      </aside>
+    {/if}
 
     <main class="viewport-panel" aria-label="Viewport 3D">
       <div class="viewport-toolbar" aria-label="Controles do viewport">
@@ -1297,40 +1498,44 @@
           {/each}
         </div>
 
-        <label class="grid-spacing-control">
-          <span>Grid</span>
-          <input
-            type="number"
-            min="0.1"
-            max="10"
-            step="0.1"
-            aria-label="Espaçamento do grid"
-            bind:value={gridSpacing}
-            on:change={handleGridSpacingChange}
-          />
-        </label>
+        {#if appMode !== 'results'}
+          <label class="grid-spacing-control">
+            <span>Grid</span>
+            <input
+              type="number"
+              min="0.1"
+              max="10"
+              step="0.1"
+              aria-label="Espaçamento do grid"
+              bind:value={gridSpacing}
+              on:change={handleGridSpacingChange}
+            />
+          </label>
 
-        <label class="work-plane-control">
-          <span>Plano</span>
-          <select
-            aria-label="Plano de trabalho"
-            bind:value={workPlane}
-            on:change={handleWorkPlaneChange}
-          >
-            <option value="XY">XY</option>
-            <option value="XZ">XZ</option>
-            <option value="YZ">YZ</option>
-          </select>
-        </label>
+          <label class="work-plane-control">
+            <span>Plano</span>
+            <select
+              aria-label="Plano de trabalho"
+              bind:value={workPlane}
+              on:change={handleWorkPlaneChange}
+            >
+              <option value="XY">XY</option>
+              <option value="XZ">XZ</option>
+              <option value="YZ">YZ</option>
+            </select>
+          </label>
 
-        <label class="snap-control">
-          <input type="checkbox" bind:checked={snapToGrid} on:change={handleSnapChange} />
-          <span>Snap-to-grid</span>
-        </label>
+          <label class="snap-control">
+            <input type="checkbox" bind:checked={snapToGrid} on:change={handleSnapChange} />
+            <span>Snap-to-grid</span>
+          </label>
+        {/if}
       </div>
 
       <div class="viewport-help" aria-live="polite">
-        {#if activeTool === 'nodes'}
+        {#if appMode === 'results'}
+          Modo de visualização de resultados · use as opções de resultado ou inicie uma nova estrutura para criar um modelo novo.
+        {:else if activeTool === 'nodes'}
           Clique no plano de trabalho para criar um nó · arrastar orbita · botão direito move · roda amplia
         {:else if activeTool === 'elements'}
           Clique em dois nós distintos para criar um elemento 1D visual · arrastar orbita
@@ -1359,6 +1564,13 @@
         {nodes}
         {elements}
         meshElements={mesh?.elements ?? []}
+        resultNodes={deformedResultNodes}
+        resultElements={resultElements}
+        showDeformedShape={showDeformedShape && importedResults !== undefined}
+        showOriginalGeometry={showOriginalGeometry && importedResults !== undefined}
+        resultMagnitudeByNode={resultMagnitudeByNode}
+        resultColorScaleMax={resultColorScaleMax}
+        resultColorMetric={resultDisplayMetric}
         {selectedNodeId}
         {selectedElementId}
         {connectionNodeIds}
@@ -1371,86 +1583,157 @@
     </main>
 
     <aside class="context-panel" aria-label="Painel lateral do modelo">
-      <section aria-labelledby="mesh-heading">
-        <h2 id="mesh-heading">Malha</h2>
-        <p class="mesh-notice">
-          {#if meshIsCurrent && mesh}
-            {mesh.elements.length} quadriláteros · célula {mesh.cellSize} · plano {mesh.workPlane}
-            {#if mesh.omittedArea > 0}
-              · área omitida: {mesh.omittedArea.toFixed(4)} unidades²
-            {/if}
-          {:else if mesh}
-            A malha existente está desatualizada. Regenere-a para o contorno, plano e espaçamento atuais.
-          {:else}
-            A ordem de criação não importa para contornos convexos. A ordenação automática atual não aceita contornos côncavos. O espaçamento do grid define o tamanho da célula.
-          {/if}
-        </p>
-        <button
-          type="button"
-          class="mesh-action"
-          disabled={meshGenerationBlockReason !== undefined}
-          aria-describedby="mesh-generation-guidance"
-          on:click={generateMesh}
-        >
-          {mesh ? 'Gerar / regenerar malha' : 'Gerar malha 2D'}
-        </button>
-        <p id="mesh-generation-guidance" class:mesh-blocked={meshGenerationBlockReason !== undefined} class="mesh-notice" role="status" aria-live="polite">
-          {meshGenerationBlockReason ?? 'Pronto para gerar; os nós serão reordenados automaticamente.'}
-        </p>
-        {#if mesh?.elements.length}
-          <p class="model-count" aria-label="Contagem de elementos da malha">
-            {mesh.elements.length} elemento(s) quadrilateral(is) de 4 nós
-          </p>
-        {/if}
-      </section>
-      <section aria-labelledby="analysis-readiness-heading">
-        <h2 id="analysis-readiness-heading">Prontidão para análise</h2>
-        <p
-          id="analysis-readiness-status"
-          class:readiness-ready={analysisReadiness.ready}
-          class:readiness-blocked={!analysisReadiness.ready}
-          role="status"
-          aria-live="polite"
-          aria-atomic="true"
-        >
-          {analysisReadiness.ready ? 'Modelo pronto para análise.' : `${analysisReadiness.issues.length} problema(s) impedem a análise.`}
-        </p>
-        <ul id="analysis-readiness-issues" class="readiness-issues">
-          {#each analysisReadiness.issues as issue (issue.code + issue.message)}
-            <li>{issue.message}</li>
-          {/each}
-          {#if analysisReadiness.ready}
-            <li>Todos os requisitos mínimos de completude foram atendidos.</li>
-          {/if}
-        </ul>
-        {#if analysisServiceError}
-          <p class="analysis-message analysis-failed" role="alert">{analysisServiceError}</p>
-        {:else if analysisUiState}
-          <div class="analysis-message" role="status" aria-live="polite" aria-atomic="true">
-            <p>{analysisUiState.message}</p>
-            {#if analysisUiState.status === 'running' || analysisUiState.status === 'cancelling'}
-              <progress max="100" value={analysisUiState.progress} aria-label="Progresso da análise">
-                {analysisUiState.progress}%
-              </progress>
-              {#if analysisService.supportsCancellation}
-                <button type="button" disabled={analysisUiState.status === 'cancelling'} on:click={cancelAnalysis}>
-                  {analysisUiState.status === 'cancelling' ? 'Cancelando…' : 'Cancelar análise'}
-                </button>
+      {#if appMode !== 'results'}
+        <section aria-labelledby="mesh-heading">
+          <h2 id="mesh-heading">Malha</h2>
+          <p class="mesh-notice">
+            {#if meshIsCurrent && mesh}
+              {mesh.elements.length} quadriláteros · célula {mesh.cellSize} · plano {mesh.workPlane}
+              {#if mesh.omittedArea > 0}
+                · área omitida: {mesh.omittedArea.toFixed(4)} unidades²
               {/if}
+            {:else if mesh}
+              A malha existente está desatualizada. Regenere-a para o contorno, plano e espaçamento atuais.
+            {:else}
+              A ordem de criação não importa para contornos convexos. A ordenação automática atual não aceita contornos côncavos. O espaçamento do grid define o tamanho da célula.
             {/if}
-          </div>
-        {/if}
-      </section>
+          </p>
+          <button
+            type="button"
+            class="mesh-action"
+            disabled={meshGenerationBlockReason !== undefined}
+            aria-describedby="mesh-generation-guidance"
+            on:click={generateMesh}
+          >
+            {mesh ? 'Gerar / regenerar malha' : 'Gerar malha 2D'}
+          </button>
+          <p id="mesh-generation-guidance" class:mesh-blocked={meshGenerationBlockReason !== undefined} class="mesh-notice" role="status" aria-live="polite">
+            {meshGenerationBlockReason ?? 'Pronto para gerar; os nós serão reordenados automaticamente.'}
+          </p>
+          {#if mesh?.elements.length}
+            <p class="model-count" aria-label="Contagem de elementos da malha">
+              {mesh.elements.length} elemento(s) quadrilateral(is) de 4 nós
+            </p>
+          {/if}
+        </section>
+        <section aria-labelledby="analysis-readiness-heading">
+          <h2 id="analysis-readiness-heading">Prontidão para análise</h2>
+          <p
+            id="analysis-readiness-status"
+            class:readiness-ready={analysisReadiness.ready}
+            class:readiness-blocked={!analysisReadiness.ready}
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            {analysisReadiness.ready ? 'Modelo pronto para análise.' : `${analysisReadiness.issues.length} problema(s) impedem a análise.`}
+          </p>
+          <ul id="analysis-readiness-issues" class="readiness-issues">
+            {#each analysisReadiness.issues as issue (issue.code + issue.message)}
+              <li>{issue.message}</li>
+            {/each}
+            {#if analysisReadiness.ready}
+              <li>Todos os requisitos mínimos de completude foram atendidos.</li>
+            {/if}
+          </ul>
+          {#if analysisServiceError}
+            <p class="analysis-message analysis-failed" role="alert">{analysisServiceError}</p>
+          {:else if analysisUiState}
+            <div class="analysis-message" role="status" aria-live="polite" aria-atomic="true">
+              <p>{analysisUiState.message}</p>
+              {#if analysisUiState.status === 'running' || analysisUiState.status === 'cancelling'}
+                <progress max="100" value={analysisUiState.progress} aria-label="Progresso da análise">
+                  {analysisUiState.progress}%
+                </progress>
+                {#if analysisService.supportsCancellation}
+                  <button type="button" disabled={analysisUiState.status === 'cancelling'} on:click={cancelAnalysis}>
+                    {analysisUiState.status === 'cancelling' ? 'Cancelando…' : 'Cancelar análise'}
+                  </button>
+                {/if}
+              {/if}
+            </div>
+          {/if}
+        </section>
+      {/if}
       <section aria-labelledby="results-heading">
         <h2 id="results-heading">Resultados</h2>
         {#if importedResults}
-          <p class="model-count">Status: {importedResults.status}</p>
+          <div class="results-header">
+            <span class="result-status-badge">{importedResults.status}</span>
+            {#if importedResults.analysisId.toLowerCase().includes('demo') || importedResults.projectId.toLowerCase().includes('demo')}
+              <span class="demo-badge">Dados de demonstração</span>
+            {/if}
+          </div>
+        {:else if appMode === 'results'}
+          <p class="mesh-notice">
+            {analysisUiState?.status === 'completed'
+              ? 'Análise concluída com sucesso. Os resultados de visualização ficam disponíveis nesta área após a importação ou emissão do relatório final.'
+              : 'Modo de visualização de resultados ativado. Carregue um arquivo de resultados para inspecionar os valores e a deformada.'}
+          </p>
+        {/if}
+        {#if importedResults}
+          <label class="toggle-row">
+            <input type="checkbox" bind:checked={showOriginalGeometry} />
+            <span>Mostrar geometria original</span>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" bind:checked={showDeformedShape} />
+            <span>Mostrar deformada</span>
+          </label>
+          <label class="result-metric-control">
+            <span>Escala de cor</span>
+            <select bind:value={resultDisplayMetric} aria-label="Métrica para a escala de cores dos resultados">
+              <option value="total">Deslocamento total</option>
+              <option value="ux">ux</option>
+              <option value="uy">uy</option>
+              <option value="uz">uz</option>
+            </select>
+          </label>
+          <div class="result-color-legend" aria-label="Legenda da escala de deformação">
+            <span>0</span>
+            <div
+              class="result-color-bar"
+              aria-hidden="true"
+              style={`background: ${getResultColorScaleGradientCss()};`}
+            ></div>
+            <span>{resultColorScaleMax.toFixed(2)} mm</span>
+          </div>
           <dl class="node-properties">
             <div><dt>Análise</dt><dd>{importedResults.analysisId}</dd></div>
             <div><dt>Nós</dt><dd>{importedResults.nodes.length}</dd></div>
-            <div><dt>Deslocamento máximo</dt><dd>{importedResults.summary?.maxDisplacementMm ?? 'N/D'} mm</dd></div>
+            <div><dt>Máximo da métrica</dt><dd>{resultColorScaleMax.toFixed(2)} mm</dd></div>
+            <div><dt>Escala</dt><dd>{resultDisplayScale.toFixed(2)}×</dd></div>
+            <div><dt>Reações</dt><dd>{importedResults.reactions?.length ?? 0}</dd></div>
             <div><dt>Gerado em</dt><dd>{new Date(importedResults.generatedAt).toLocaleString('pt-BR')}</dd></div>
           </dl>
+          {#if importedResults.reactions?.length}
+            <div class="results-subsection">
+              <strong>Reações</strong>
+              <ul class="mini-list">
+                {#each importedResults.reactions.slice(0, 4) as reaction}
+                  <li>{reaction.nodeId ?? 'Nó'} · {Object.entries(reaction)
+                    .filter(([key]) => key !== 'nodeId')
+                    .slice(0, 2)
+                    .map(([key, value]) => `${key}: ${Number(value).toFixed(2)}`)
+                    .join(' · ') || 'Sem valores'}</li>
+                {/each}
+              </ul>
+            </div>
+          {/if}
+          {#if importedResults.elements?.length}
+            <div class="results-subsection">
+              <strong>Resultados por elemento</strong>
+              <ul class="mini-list">
+                {#each importedResults.elements.slice(0, 4) as element}
+                  <li>{element.elementId ?? 'Elemento'} · {Object.entries(element)
+                    .filter(([key]) => key !== 'elementId' && key !== 'type')
+                    .slice(0, 2)
+                    .map(([key, value]) => `${key}: ${Number(value).toFixed(2)}`)
+                    .join(' · ') || 'Sem valores'}</li>
+                {/each}
+              </ul>
+            </div>
+          {/if}
         {:else}
           <div class="empty-state">Nenhum arquivo de resultados importado. Use o botão Resultados para carregar um JSON válido.</div>
         {/if}
@@ -2033,6 +2316,84 @@
     margin: 0;
     color: #94a3b8;
     font-size: 0.78rem;
+  }
+
+  .results-header {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    align-items: center;
+  }
+
+  .result-status-badge,
+  .demo-badge {
+    display: inline-flex;
+    align-items: center;
+    min-height: 1.5rem;
+    padding: 0.2rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+
+  .result-status-badge {
+    background: rgba(34, 197, 94, 0.18);
+    border: 1px solid rgba(34, 197, 94, 0.4);
+    color: #86efac;
+  }
+
+  .demo-badge {
+    background: rgba(251, 191, 36, 0.12);
+    border: 1px solid rgba(251, 191, 36, 0.4);
+    color: #fcd34d;
+  }
+
+  .toggle-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    color: #cbd5e1;
+    font-size: 0.76rem;
+  }
+
+  .result-color-legend {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.4rem 0.5rem;
+    border: 1px solid #334155;
+    border-radius: 0.55rem;
+    background: rgba(15, 23, 42, 0.7);
+    color: #cbd5e1;
+    font-size: 0.72rem;
+  }
+
+  .result-color-bar {
+    width: 100%;
+    min-height: 0.7rem;
+    border-radius: 999px;
+    border: 1px solid rgba(148, 163, 184, 0.5);
+    box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.2);
+  }
+
+  .results-subsection {
+    display: grid;
+    gap: 0.35rem;
+    margin-top: 0.2rem;
+    color: #cbd5e1;
+    font-size: 0.72rem;
+  }
+
+  .mini-list {
+    display: grid;
+    gap: 0.25rem;
+    margin: 0;
+    padding-left: 1rem;
+    color: #cbd5e1;
+    word-break: break-word;
   }
 
   .readiness-blocked,
