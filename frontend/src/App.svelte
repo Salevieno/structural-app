@@ -1564,6 +1564,9 @@
         {nodes}
         {elements}
         meshElements={mesh?.elements ?? []}
+        {nodalLoads}
+        {prescribedDisplacements}
+        {nodalSupports}
         resultNodes={deformedResultNodes}
         resultElements={resultElements}
         showDeformedShape={showDeformedShape && importedResults !== undefined}
