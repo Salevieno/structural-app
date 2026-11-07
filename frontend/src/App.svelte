@@ -1351,14 +1351,17 @@
         1,
         ...((importedResults.displacements ?? importedResults.nodes ?? []).map((entry) => {
           const candidate = ('nodeId' in entry && typeof entry.nodeId === 'string' ? entry : undefined) as
-            | { nodeId?: string; uxMm?: number; uyMm?: number; uzMm?: number }
+            | { nodeId?: string; uxMm?: number | undefined; uyMm?: number | undefined; uzMm?: number | undefined }
             | undefined;
           return getResultDisplacementMagnitudeMm(candidate, resultDisplayMetric);
         })),
       )
     : 1;
   $: resultMagnitudeByNode = (importedResults?.nodes ?? []).map((node) => {
-    const displacement = {
+    const displacementByNode = new Map(
+      (importedResults?.displacements ?? []).map((entry) => [entry.nodeId, entry]),
+    );
+    const displacement = displacementByNode.get(node.nodeId) ?? {
       uxMm: node.uxMm ?? node.displacement?.uxMm ?? undefined,
       uyMm: node.uyMm ?? node.displacement?.uyMm ?? undefined,
       uzMm: node.uzMm ?? node.displacement?.uzMm ?? undefined,
@@ -1668,7 +1671,11 @@
           </label>
           <div class="result-color-legend" aria-label="Legenda da escala de deformação">
             <span>0</span>
-            <div class="result-color-bar" aria-hidden="true"></div>
+            <div
+              class="result-color-bar"
+              aria-hidden="true"
+              style="background: linear-gradient(to right, #2563eb 0%, #38bdf8 32%, #22c55e 62%, #84cc16 100%);"
+            ></div>
             <span>{resultColorScaleMax.toFixed(2)} mm</span>
           </div>
           <dl class="node-properties">
@@ -2329,6 +2336,27 @@
     gap: 0.45rem;
     color: #cbd5e1;
     font-size: 0.76rem;
+  }
+
+  .result-color-legend {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.4rem 0.5rem;
+    border: 1px solid #334155;
+    border-radius: 0.55rem;
+    background: rgba(15, 23, 42, 0.7);
+    color: #cbd5e1;
+    font-size: 0.72rem;
+  }
+
+  .result-color-bar {
+    width: 100%;
+    min-height: 0.7rem;
+    border-radius: 999px;
+    border: 1px solid rgba(148, 163, 184, 0.5);
+    box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.2);
   }
 
   .results-subsection {

@@ -200,9 +200,10 @@
   const colorFromMagnitude = (magnitude: number): number => {
     const clampedMagnitude = Math.max(0, Math.min(magnitude, resultColorScaleMax || 1));
     const ratio = resultColorScaleMax > 0 ? clampedMagnitude / resultColorScaleMax : 0;
-    const hue = 0.67 - ratio * 0.67;
+    const metricShift = resultColorMetric === 'ux' ? 0.02 : resultColorMetric === 'uy' ? 0.04 : resultColorMetric === 'uz' ? 0.06 : 0;
+    const hue = 0.62 - ratio * 0.34 + metricShift;
     const color = new THREE.Color();
-    color.setHSL(hue, 0.85, 0.56);
+    color.setHSL(hue, 0.82, 0.56);
     return color.getHex();
   };
 
@@ -210,8 +211,7 @@
     const entry = resultMagnitudeByNode.find((item) => item.id === nodeId);
     const candidateMagnitude = entry?.magnitude;
     const magnitude: number = Number.isFinite(candidateMagnitude) ? Number(candidateMagnitude) : 0;
-    const metricAdjustment = resultColorMetric === 'total' ? 1 : resultColorMetric === 'ux' ? 0.9 : resultColorMetric === 'uy' ? 0.85 : 0.8;
-    return magnitude * metricAdjustment;
+    return magnitude;
   };
 
   const updateDeformationOverlay = (currentNodes: StructuralNode[], currentResultNodes: Array<{ id: string; position: Position3D }>): void => {
