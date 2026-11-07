@@ -4,7 +4,7 @@
   import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
   import { logger } from '../logging';
   import type { StructuralElement1D, StructuralNode, StructuralQuadElement2D } from '../domain/model';
-  import type { ResultDisplayMetric } from '../domain/resultsVisualization';
+  import { getResultColorHex, type ResultDisplayMetric } from '../domain/resultsVisualization';
   import type { CameraView } from './types';
   import { snapPositionToGrid, type Position3D, type WorkPlane } from './workPlane';
 
@@ -198,13 +198,11 @@
   };
 
   const colorFromMagnitude = (magnitude: number): number => {
-    const clampedMagnitude = Math.max(0, Math.min(magnitude, resultColorScaleMax || 1));
-    const ratio = resultColorScaleMax > 0 ? clampedMagnitude / resultColorScaleMax : 0;
-    const metricShift = resultColorMetric === 'ux' ? 0.02 : resultColorMetric === 'uy' ? 0.04 : resultColorMetric === 'uz' ? 0.06 : 0;
-    const hue = 0.62 - ratio * 0.34 + metricShift;
-    const color = new THREE.Color();
-    color.setHSL(hue, 0.82, 0.56);
-    return color.getHex();
+    const metricContext = resultColorMetric;
+    const metricAdjustment = metricContext === 'ux' ? 0.01 : metricContext === 'uy' ? 0.02 : metricContext === 'uz' ? 0.03 : 0;
+    const adjustedMagnitude = Math.max(0, magnitude * (1 + metricAdjustment));
+    const colorValue = getResultColorHex(adjustedMagnitude, resultColorScaleMax);
+    return new THREE.Color(colorValue).getHex();
   };
 
   const resultMagnitudeForNode = (nodeId: string): number => {

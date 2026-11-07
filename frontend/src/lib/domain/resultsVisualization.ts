@@ -30,29 +30,160 @@ export interface ResultDisplayNode {
 
 export type ResultDisplayMetric = 'total' | 'ux' | 'uy' | 'uz';
 
+type ResultMagnitudeSource = {
+  uxMm?: number | undefined;
+  uyMm?: number | undefined;
+  uzMm?: number | undefined;
+};
+
+const toNumeric = (value: number | undefined): number => (
+  Number.isFinite(value ?? Number.NaN) ? Number(value ?? 0) : 0
+);
+
+const normalizeDisplacementEntry = (
+  entry: ResultMagnitudeSource | undefined,
+): ResultMagnitudeSource => ({
+  uxMm: toNumeric(entry?.uxMm),
+  uyMm: toNumeric(entry?.uyMm),
+  uzMm: toNumeric(entry?.uzMm),
+});
+
 export const getResultDisplacementMagnitudeMm = (
-  entry: { uxMm?: number | undefined; uyMm?: number | undefined; uzMm?: number | undefined } | undefined,
+  entry: ResultMagnitudeSource | undefined,
   metric: ResultDisplayMetric = 'total',
 ): number => {
-  if (!entry) {
-    return 0;
-  }
-
-  const ux = Number.isFinite(entry.uxMm ?? Number.NaN) ? Number(entry.uxMm ?? 0) : 0;
-  const uy = Number.isFinite(entry.uyMm ?? Number.NaN) ? Number(entry.uyMm ?? 0) : 0;
-  const uz = Number.isFinite(entry.uzMm ?? Number.NaN) ? Number(entry.uzMm ?? 0) : 0;
+  const uxMm = toNumeric(entry?.uxMm);
+  const uyMm = toNumeric(entry?.uyMm);
+  const uzMm = toNumeric(entry?.uzMm);
 
   switch (metric) {
     case 'ux':
-      return Math.abs(ux);
+      return Math.abs(uxMm);
     case 'uy':
-      return Math.abs(uy);
+      return Math.abs(uyMm);
     case 'uz':
-      return Math.abs(uz);
+      return Math.abs(uzMm);
     case 'total':
     default:
-      return Math.hypot(ux, uy, uz);
+      return Math.hypot(uxMm, uyMm, uzMm);
   }
+};
+
+const hexToRgb = (hex: number): [number, number, number] => {
+  const r = (hex >> 16) & 255;
+  const g = (hex >> 8) & 255;
+  const b = hex & 255;
+  return [r, g, b];
+};
+
+const interpolateChannel = (start: number, end: number, ratio: number): number => {
+  const clampedRatio = Math.min(1, Math.max(0, ratio));
+  return Math.round(start + (end - start) * clampedRatio);
+};
+
+const rgbToHex = (r: number, g: number, b: number): number => (r << 16) + (g << 8) + b;
+
+export const getResultColorHexAtRatio = (ratio: number): number => {
+  const clampedRatio = Math.min(1, Math.max(0, ratio));
+  const stops: Array<{ stop: number; color: number }> = [
+    { stop: 0, color: 0x2563eb },
+    { stop: 0.35, color: 0x38bdf8 },
+    { stop: 0.65, color: 0x22c55e },
+    { stop: 1, color: 0x84cc16 },
+  ];
+
+  const firstStop = stops[0];
+  if (!firstStop) {
+    return 0;
+  }
+
+  if (clampedRatio <= firstStop.stop) {
+    return firstStop.color;
+  }
+
+  for (let index = 0; index < stops.length - 1; index += 1) {
+    const start = stops[index]!;
+    const end = stops[index + 1]!;
+
+    if (clampedRatio >= start.stop && clampedRatio <= end.stop) {
+      const span = end.stop - start.stop || 1;
+      const localRatio = (clampedRatio - start.stop) / span;
+      const startRgb = hexToRgb(start.color);
+      const endRgb = hexToRgb(end.color);
+      return rgbToHex(
+        interpolateChannel(startRgb[0], endRgb[0], localRatio),
+        interpolateChannel(startRgb[1], endRgb[1], localRatio),
+        interpolateChannel(startRgb[2], endRgb[2], localRatio),
+      );
+    }
+  }
+
+  const lastStop = stops[stops.length - 1];
+  return lastStop?.color ?? 0;
+};
+
+export const getResultColorHex = (magnitude: number, maxMagnitude: number): number => {
+  const safeMax = Number.isFinite(maxMagnitude) && maxMagnitude > 0 ? maxMagnitude : 1;
+  const safeMagnitude = Number.isFinite(magnitude) ? magnitude : 0;
+  const ratio = Math.min(1, Math.max(0, safeMagnitude / safeMax));
+  return getResultColorHexAtRatio(ratio);
+};
+
+export const getResultColorScaleGradientCss = (): string => {
+  const stops = [0, 0.25, 0.5, 0.75, 1]
+    .map((ratio) => `${'#' + getResultColorHexAtRatio(ratio).toString(16).padStart(6, '0')} ${ratio * 100}%`)
+    .join(', ');
+
+  return `linear-gradient(to right, ${stops})`;
+};
+
+export const getResultMetricMaximum = (
+  results: {
+    displacements?: Array<ResultMagnitudeSource & { nodeId?: string }>;
+    nodes?: Array<{
+      nodeId?: string;
+      uxMm?: number | undefined;
+      uyMm?: number | undefined;
+      uzMm?: number | undefined;
+      displacement?: ResultMagnitudeSource;
+    }>;
+  } | undefined,
+  metric: ResultDisplayMetric = 'total',
+): number => {
+  if (!results) {
+    return 1;
+  }
+
+  const candidates: number[] = [];
+
+  for (const entry of [...(results.displacements ?? []), ...(results.nodes ?? [])]) {
+    const rawEntry = entry as Record<string, unknown>;
+    const displacementEntry = rawEntry.displacement && typeof rawEntry.displacement === 'object'
+      ? rawEntry.displacement as Record<string, unknown>
+      : undefined;
+
+    const displacement: ResultMagnitudeSource = {
+      uxMm: typeof rawEntry.uxMm === 'number'
+        ? rawEntry.uxMm
+        : typeof displacementEntry?.uxMm === 'number'
+          ? displacementEntry.uxMm
+          : undefined,
+      uyMm: typeof rawEntry.uyMm === 'number'
+        ? rawEntry.uyMm
+        : typeof displacementEntry?.uyMm === 'number'
+          ? displacementEntry.uyMm
+          : undefined,
+      uzMm: typeof rawEntry.uzMm === 'number'
+        ? rawEntry.uzMm
+        : typeof displacementEntry?.uzMm === 'number'
+          ? displacementEntry.uzMm
+          : undefined,
+    };
+
+    candidates.push(getResultDisplacementMagnitudeMm(displacement, metric));
+  }
+
+  return candidates.length > 0 ? Math.max(...candidates, 1) : 1;
 };
 
 export const resolveResultDisplayScale = (maxDisplacementMm?: number): number => {

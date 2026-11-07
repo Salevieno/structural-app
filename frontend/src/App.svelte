@@ -45,6 +45,7 @@
   import { createModelImportService } from './lib/services/modelImport';
   import {
     buildDeformedNodePositions,
+    getResultColorScaleGradientCss,
     getResultDisplacementMagnitudeMm,
     resolveResultDisplayScale,
     type ResultDisplayMetric,
@@ -817,6 +818,12 @@
 
     importedResults = undefined;
     analysisUiState = undefined;
+    resultDisplayMetric = 'total';
+    resultDisplayScale = 1;
+    resultColorScaleMax = 1;
+    resultMagnitudeByNode = [];
+    deformedResultNodes = [];
+    resultElements = [];
     nodes = [];
     elements = [];
     mesh = undefined;
@@ -1345,18 +1352,31 @@
   $: if (appMode === 'results') {
     activeTool = 'select';
   }
-  $: resultDisplayScale = importedResults ? resolveResultDisplayScale(importedResults.summary?.maxDisplacementMm) : 1;
   $: resultColorScaleMax = importedResults
     ? Math.max(
         1,
         ...((importedResults.displacements ?? importedResults.nodes ?? []).map((entry) => {
           const candidate = ('nodeId' in entry && typeof entry.nodeId === 'string' ? entry : undefined) as
-            | { nodeId?: string; uxMm?: number | undefined; uyMm?: number | undefined; uzMm?: number | undefined }
+            | {
+                nodeId?: string;
+                uxMm?: number | undefined;
+                uyMm?: number | undefined;
+                uzMm?: number | undefined;
+                displacement?: { uxMm?: number | undefined; uyMm?: number | undefined; uzMm?: number | undefined };
+              }
             | undefined;
-          return getResultDisplacementMagnitudeMm(candidate, resultDisplayMetric);
+          const displacement = candidate
+            ? {
+                uxMm: candidate.uxMm ?? candidate.displacement?.uxMm ?? undefined,
+                uyMm: candidate.uyMm ?? candidate.displacement?.uyMm ?? undefined,
+                uzMm: candidate.uzMm ?? candidate.displacement?.uzMm ?? undefined,
+              }
+            : undefined;
+          return getResultDisplacementMagnitudeMm(displacement, resultDisplayMetric);
         })),
       )
     : 1;
+  $: resultDisplayScale = importedResults ? resolveResultDisplayScale(resultColorScaleMax) : 1;
   $: resultMagnitudeByNode = (importedResults?.nodes ?? []).map((node) => {
     const displacementByNode = new Map(
       (importedResults?.displacements ?? []).map((entry) => [entry.nodeId, entry]),
@@ -1674,14 +1694,14 @@
             <div
               class="result-color-bar"
               aria-hidden="true"
-              style="background: linear-gradient(to right, #2563eb 0%, #38bdf8 32%, #22c55e 62%, #84cc16 100%);"
+              style={`background: ${getResultColorScaleGradientCss()};`}
             ></div>
             <span>{resultColorScaleMax.toFixed(2)} mm</span>
           </div>
           <dl class="node-properties">
             <div><dt>Análise</dt><dd>{importedResults.analysisId}</dd></div>
             <div><dt>Nós</dt><dd>{importedResults.nodes.length}</dd></div>
-            <div><dt>Deslocamento máximo</dt><dd>{importedResults.summary?.maxDisplacementMm ?? 'N/D'} mm</dd></div>
+            <div><dt>Máximo da métrica</dt><dd>{resultColorScaleMax.toFixed(2)} mm</dd></div>
             <div><dt>Escala</dt><dd>{resultDisplayScale.toFixed(2)}×</dd></div>
             <div><dt>Reações</dt><dd>{importedResults.reactions?.length ?? 0}</dd></div>
             <div><dt>Gerado em</dt><dd>{new Date(importedResults.generatedAt).toLocaleString('pt-BR')}</dd></div>
