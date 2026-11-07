@@ -28,6 +28,33 @@ export interface ResultDisplayNode {
   };
 }
 
+export type ResultDisplayMetric = 'total' | 'ux' | 'uy' | 'uz';
+
+export const getResultDisplacementMagnitudeMm = (
+  entry: { uxMm?: number | undefined; uyMm?: number | undefined; uzMm?: number | undefined } | undefined,
+  metric: ResultDisplayMetric = 'total',
+): number => {
+  if (!entry) {
+    return 0;
+  }
+
+  const ux = Number.isFinite(entry.uxMm ?? Number.NaN) ? Number(entry.uxMm ?? 0) : 0;
+  const uy = Number.isFinite(entry.uyMm ?? Number.NaN) ? Number(entry.uyMm ?? 0) : 0;
+  const uz = Number.isFinite(entry.uzMm ?? Number.NaN) ? Number(entry.uzMm ?? 0) : 0;
+
+  switch (metric) {
+    case 'ux':
+      return Math.abs(ux);
+    case 'uy':
+      return Math.abs(uy);
+    case 'uz':
+      return Math.abs(uz);
+    case 'total':
+    default:
+      return Math.hypot(ux, uy, uz);
+  }
+};
+
 export const resolveResultDisplayScale = (maxDisplacementMm?: number): number => {
   if (!Number.isFinite(maxDisplacementMm) || maxDisplacementMm === undefined || maxDisplacementMm <= 0) {
     return 1;

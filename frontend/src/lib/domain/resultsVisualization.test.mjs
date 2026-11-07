@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildDeformedNodePositions, resolveResultDisplayScale } from './resultsVisualization.ts';
+import {
+  buildDeformedNodePositions,
+  getResultDisplacementMagnitudeMm,
+  resolveResultDisplayScale,
+} from './resultsVisualization.ts';
 
 const nodes = [
   { id: 'N1', position: { x: 0, y: 0, z: 0 }, origin: 'user' },
@@ -21,6 +25,14 @@ test('applies nodal displacements to the deformed model without changing unmatch
 
   assert.deepEqual(n1.position, { x: 0, y: 0, z: 0 });
   assert.deepEqual(n2.position, { x: 4, y: 1, z: 0 });
+});
+
+test('computes the displacement magnitude used for the result color scale', () => {
+  const entry = { uxMm: 1.5, uyMm: 2, uzMm: -0.5 };
+  assert.equal(getResultDisplacementMagnitudeMm(entry, 'total'), Math.hypot(1.5, 2, -0.5));
+  assert.equal(getResultDisplacementMagnitudeMm(entry, 'ux'), 1.5);
+  assert.equal(getResultDisplacementMagnitudeMm(entry, 'uy'), 2);
+  assert.equal(getResultDisplacementMagnitudeMm(entry, 'uz'), 0.5);
 });
 
 test('creates a temporary preview layout when the imported results are visualized before the model is loaded', () => {

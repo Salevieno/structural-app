@@ -45,7 +45,9 @@
   import { createModelImportService } from './lib/services/modelImport';
   import {
     buildDeformedNodePositions,
+    getResultDisplacementMagnitudeMm,
     resolveResultDisplayScale,
+    type ResultDisplayMetric,
   } from './lib/domain/resultsVisualization';
   import SceneViewport from './lib/viewport/SceneViewport.svelte';
   import type { CameraView } from './lib/viewport/types';
@@ -177,7 +179,11 @@
   let importedResults: StructuralResultsDocument | undefined;
   let appMode: 'creation' | 'results' = 'creation';
   let showDeformedShape = true;
+  let showOriginalGeometry = true;
+  let resultDisplayMetric: ResultDisplayMetric = 'total';
   let resultDisplayScale = 1;
+  let resultColorScaleMax = 1;
+  let resultMagnitudeByNode: Array<{ id: string; magnitude: number }> = [];
   let deformedResultNodes: Array<{ id: string; position: { x: number; y: number; z: number } }> = [];
   let resultElements: Array<{ id: string; nodeIds: string[] }> = [];
   let resultsImportStatus: 'idle' | 'ready' | 'error' = 'idle';
@@ -1340,6 +1346,28 @@
     activeTool = 'select';
   }
   $: resultDisplayScale = importedResults ? resolveResultDisplayScale(importedResults.summary?.maxDisplacementMm) : 1;
+  $: resultColorScaleMax = importedResults
+    ? Math.max(
+        1,
+        ...((importedResults.displacements ?? importedResults.nodes ?? []).map((entry) => {
+          const candidate = ('nodeId' in entry && typeof entry.nodeId === 'string' ? entry : undefined) as
+            | { nodeId?: string; uxMm?: number; uyMm?: number; uzMm?: number }
+            | undefined;
+          return getResultDisplacementMagnitudeMm(candidate, resultDisplayMetric);
+        })),
+      )
+    : 1;
+  $: resultMagnitudeByNode = (importedResults?.nodes ?? []).map((node) => {
+    const displacement = {
+      uxMm: node.uxMm ?? node.displacement?.uxMm ?? undefined,
+      uyMm: node.uyMm ?? node.displacement?.uyMm ?? undefined,
+      uzMm: node.uzMm ?? node.displacement?.uzMm ?? undefined,
+    };
+    return {
+      id: node.nodeId,
+      magnitude: getResultDisplacementMagnitudeMm(displacement, resultDisplayMetric),
+    };
+  });
   $: deformedResultNodes = buildDeformedNodePositions(
     nodes,
     importedResults?.nodes,
@@ -1516,6 +1544,10 @@
         resultNodes={deformedResultNodes}
         resultElements={resultElements}
         showDeformedShape={showDeformedShape && importedResults !== undefined}
+        showOriginalGeometry={showOriginalGeometry && importedResults !== undefined}
+        resultMagnitudeByNode={resultMagnitudeByNode}
+        resultColorScaleMax={resultColorScaleMax}
+        resultColorMetric={resultDisplayMetric}
         {selectedNodeId}
         {selectedElementId}
         {connectionNodeIds}
@@ -1618,9 +1650,27 @@
         {/if}
         {#if importedResults}
           <label class="toggle-row">
+            <input type="checkbox" bind:checked={showOriginalGeometry} />
+            <span>Mostrar geometria original</span>
+          </label>
+          <label class="toggle-row">
             <input type="checkbox" bind:checked={showDeformedShape} />
             <span>Mostrar deformada</span>
           </label>
+          <label class="result-metric-control">
+            <span>Escala de cor</span>
+            <select bind:value={resultDisplayMetric} aria-label="Métrica para a escala de cores dos resultados">
+              <option value="total">Deslocamento total</option>
+              <option value="ux">ux</option>
+              <option value="uy">uy</option>
+              <option value="uz">uz</option>
+            </select>
+          </label>
+          <div class="result-color-legend" aria-label="Legenda da escala de deformação">
+            <span>0</span>
+            <div class="result-color-bar" aria-hidden="true"></div>
+            <span>{resultColorScaleMax.toFixed(2)} mm</span>
+          </div>
           <dl class="node-properties">
             <div><dt>Análise</dt><dd>{importedResults.analysisId}</dd></div>
             <div><dt>Nós</dt><dd>{importedResults.nodes.length}</dd></div>

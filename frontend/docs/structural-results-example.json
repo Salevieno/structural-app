@@ -12,15 +12,25 @@
   },
   "nodes": [
     { "nodeId": "N1", "position": { "x": 0.0, "y": 0.0, "z": 0.0 } },
-    { "nodeId": "N2", "position": { "x": 4.0, "y": 0.0, "z": 0.0 } },
-    { "nodeId": "N3", "position": { "x": 4.0, "y": 4.0, "z": 0.0 } },
-    { "nodeId": "N4", "position": { "x": 0.0, "y": 4.0, "z": 0.0 } }
+    { "nodeId": "N2", "position": { "x": 10.0, "y": 0.0, "z": 0.0 } },
+    { "nodeId": "N3", "position": { "x": 20.0, "y": 0.0, "z": 0.0 } },
+    { "nodeId": "N4", "position": { "x": 0.0, "y": 10.0, "z": 0.0 } },
+    { "nodeId": "N5", "position": { "x": 10.0, "y": 10.0, "z": 0.0 } },
+    { "nodeId": "N6", "position": { "x": 20.0, "y": 10.0, "z": 0.0 } },
+    { "nodeId": "N7", "position": { "x": 0.0, "y": 20.0, "z": 0.0 } },
+    { "nodeId": "N8", "position": { "x": 10.0, "y": 20.0, "z": 0.0 } },
+    { "nodeId": "N9", "position": { "x": 20.0, "y": 20.0, "z": 0.0 } }
   ],
   "displacements": [
     { "nodeId": "N1", "uxMm": 0, "uyMm": 0, "uzMm": 0, "txRad": 0, "tyRad": 0, "tzRad": 0 },
     { "nodeId": "N2", "uxMm": 0.08, "uyMm": 0.05, "uzMm": 0, "txRad": 0.0006, "tyRad": 0, "tzRad": 0 },
-    { "nodeId": "N3", "uxMm": 0.12, "uyMm": 0.14, "uzMm": 0, "txRad": 0.0011, "tyRad": 0, "tzRad": 0 },
-    { "nodeId": "N4", "uxMm": 0.21, "uyMm": 0.27, "uzMm": 0, "txRad": 0.0016, "tyRad": 0, "tzRad": 0 }
+    { "nodeId": "N3", "uxMm": 0.12, "uyMm": 0.09, "uzMm": 0, "txRad": 0.0008, "tyRad": 0, "tzRad": 0 },
+    { "nodeId": "N4", "uxMm": 0.18, "uyMm": 0.11, "uzMm": 0, "txRad": 0.0010, "tyRad": 0, "tzRad": 0 },
+    { "nodeId": "N5", "uxMm": 0.21, "uyMm": 0.15, "uzMm": 0, "txRad": 0.0013, "tyRad": 0, "tzRad": 0 },
+    { "nodeId": "N6", "uxMm": 0.17, "uyMm": 0.13, "uzMm": 0, "txRad": 0.0012, "tyRad": 0, "tzRad": 0 },
+    { "nodeId": "N7", "uxMm": 0.25, "uyMm": 0.21, "uzMm": 0, "txRad": 0.0018, "tyRad": 0, "tzRad": 0 },
+    { "nodeId": "N8", "uxMm": 0.23, "uyMm": 0.24, "uzMm": 0, "txRad": 0.0017, "tyRad": 0, "tzRad": 0 },
+    { "nodeId": "N9", "uxMm": 0.27, "uyMm": 0.28, "uzMm": 0, "txRad": 0.0021, "tyRad": 0, "tzRad": 0 }
   ],
   "reactions": [
     {
@@ -36,7 +46,15 @@
   "elements": [
     { "elementId": "E1", "nodeIds": ["N1", "N2"], "type": "line1d", "normalForce_kN": 8.5, "shearForceY_kN": 0.8, "bendingMoment_kNm": 1.2 },
     { "elementId": "E2", "nodeIds": ["N2", "N3"], "type": "line1d", "normalForce_kN": 12.1, "shearForceY_kN": 1.3, "bendingMoment_kNm": 1.8 },
-    { "elementId": "E3", "nodeIds": ["N3", "N4"], "type": "line1d", "normalForce_kN": 10.6, "shearForceY_kN": 0.9, "bendingMoment_kNm": 1.5 },
-    { "elementId": "Q1", "nodeIds": ["N1", "N2", "N3", "N4"], "type": "quad4", "stress": 15.2 }
+    { "elementId": "E3", "nodeIds": ["N3", "N6"], "type": "line1d", "normalForce_kN": 10.6, "shearForceY_kN": 0.9, "bendingMoment_kNm": 1.5 },
+    { "elementId": "E4", "nodeIds": ["N6", "N9"], "type": "line1d", "normalForce_kN": 11.3, "shearForceY_kN": 1.0, "bendingMoment_kNm": 1.7 },
+    { "elementId": "E5", "nodeIds": ["N9", "N8"], "type": "line1d", "normalForce_kN": 9.8, "shearForceY_kN": 0.7, "bendingMoment_kNm": 1.3 },
+    { "elementId": "E6", "nodeIds": ["N8", "N7"], "type": "line1d", "normalForce_kN": 8.6, "shearForceY_kN": 0.6, "bendingMoment_kNm": 1.1 },
+    { "elementId": "E7", "nodeIds": ["N7", "N4"], "type": "line1d", "normalForce_kN": 9.4, "shearForceY_kN": 0.8, "bendingMoment_kNm": 1.4 },
+    { "elementId": "E8", "nodeIds": ["N4", "N1"], "type": "line1d", "normalForce_kN": 7.9, "shearForceY_kN": 0.5, "bendingMoment_kNm": 0.9 },
+    { "elementId": "Q1", "nodeIds": ["N1", "N2", "N5", "N4"], "type": "quad4", "stress": 12.6 },
+    { "elementId": "Q2", "nodeIds": ["N2", "N3", "N6", "N5"], "type": "quad4", "stress": 14.1 },
+    { "elementId": "Q3", "nodeIds": ["N4", "N5", "N8", "N7"], "type": "quad4", "stress": 13.7 },
+    { "elementId": "Q4", "nodeIds": ["N5", "N6", "N9", "N8"], "type": "quad4", "stress": 15.2 }
   ]
 }
