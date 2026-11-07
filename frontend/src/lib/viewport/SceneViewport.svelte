@@ -3,7 +3,14 @@
   import * as THREE from 'three';
   import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
   import { logger } from '../logging';
-  import type { StructuralElement1D, StructuralNode, StructuralQuadElement2D } from '../domain/model';
+  import type {
+    NodalSupport,
+    PrescribedNodalDisplacement,
+    StructuralElement1D,
+    StructuralNodalLoad,
+    StructuralNode,
+    StructuralQuadElement2D,
+  } from '../domain/model';
   import { getResultColorHex, type ResultDisplayMetric } from '../domain/resultsVisualization';
   import type { CameraView } from './types';
   import { snapPositionToGrid, type Position3D, type WorkPlane } from './workPlane';
@@ -26,6 +33,9 @@
   export let nodes: StructuralNode[] = [];
   export let elements: StructuralElement1D[] = [];
   export let meshElements: readonly StructuralQuadElement2D[] = [];
+  export let nodalLoads: StructuralNodalLoad[] = [];
+  export let prescribedDisplacements: PrescribedNodalDisplacement[] = [];
+  export let nodalSupports: NodalSupport[] = [];
   export let resultNodes: Array<{ id: string; position: Position3D }> = [];
   export let resultElements: Array<{ id: string; nodeIds: string[] }> = [];
   export let resultMagnitudeByNode: Array<{ id: string; magnitude: number }> = [];
@@ -50,6 +60,7 @@
   let grid: THREE.LineSegments | undefined;
   let nodeGroup: THREE.Group | undefined;
   let elementGroup: THREE.Group | undefined;
+  let assignmentGroup: THREE.Group | undefined;
   let deformationGroup: THREE.Group | undefined;
   let previewMarker: THREE.Mesh | undefined;
   let resizeObserver: ResizeObserver | undefined;
@@ -345,6 +356,250 @@
     scene.add(activeDeformationGroup);
   };
 
+  const getElementAssignmentColor = (element: { materialId?: string; sectionId?: string }, defaultColor: number): number => {
+    const missingMaterial = !element.materialId;
+    const missingSection = !element.sectionId;
+    if (missingMaterial && missingSection) {
+      return 0xef4444;
+    }
+    if (missingMaterial) {
+      return 0xf59e0b;
+    }
+    if (missingSection) {
+      return 0xf97316;
+    }
+    return defaultColor;
+  };
+
+  const createVectorArrow = (
+    origin: THREE.Vector3,
+    vector: THREE.Vector3,
+    color: number,
+    lengthScale = 1,
+  ): THREE.ArrowHelper | undefined => {
+    if (vector.lengthSq() < 1e-8) {
+      return undefined;
+    }
+    const direction = vector.clone().normalize();
+    const magnitude = vector.length();
+    const arrow = new THREE.ArrowHelper(
+      direction,
+      origin,
+      Math.max(0.6, magnitude * lengthScale),
+      color,
+      Math.max(0.25, magnitude * 0.22 + 0.18),
+      0.2,
+    );
+    return arrow;
+  };
+
+  const createMomentMarker = (origin: THREE.Vector3, vector: THREE.Vector3, color: number): THREE.Group | undefined => {
+    if (vector.lengthSq() < 1e-8) {
+      return undefined;
+    }
+    const axis = vector.clone().normalize();
+    const group = new THREE.Group();
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.42, 0.04, 8, 22),
+      new THREE.MeshBasicMaterial({ color }),
+    );
+    ring.rotation.x = Math.PI / 2;
+    const referenceAxis = new THREE.Vector3(0, 1, 0);
+    const quaternion = new THREE.Quaternion().setFromUnitVectors(referenceAxis, axis);
+    ring.quaternion.premultiply(quaternion);
+    group.add(ring);
+    const arrow = createVectorArrow(origin.clone().add(axis.clone().multiplyScalar(0.6)), axis.clone().multiplyScalar(0.35), color, 0.8);
+    if (arrow) {
+      group.add(arrow);
+    }
+    group.position.copy(origin);
+    return group;
+  };
+
+  const addSupportMarkers = (node: StructuralNode, support: NodalSupport): void => {
+    if (!assignmentGroup) {
+      return;
+    }
+    const position = new THREE.Vector3(node.position.x, node.position.y, node.position.z);
+    const marker = new THREE.Group();
+    const supportColor = 0x8b5cf6;
+    const axes: Array<{ axis: THREE.Vector3; enabled: boolean }> = [
+      { axis: new THREE.Vector3(1, 0, 0), enabled: support.restraints.ux },
+      { axis: new THREE.Vector3(0, 1, 0), enabled: support.restraints.uy },
+      { axis: new THREE.Vector3(0, 0, 1), enabled: support.restraints.uz },
+    ];
+    axes.forEach(({ axis, enabled }) => {
+      if (!enabled) {
+        return;
+      }
+      const segment = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([
+          new THREE.Vector3(0, 0, 0),
+          axis.clone().multiplyScalar(0.8),
+        ]),
+        new THREE.LineBasicMaterial({ color: supportColor, linewidth: 2 }),
+      );
+      marker.add(segment);
+    });
+    const rotationalAxes: Array<{ axis: THREE.Vector3; enabled: boolean }> = [
+      { axis: new THREE.Vector3(1, 0, 0), enabled: support.restraints.tx },
+      { axis: new THREE.Vector3(0, 1, 0), enabled: support.restraints.ty },
+      { axis: new THREE.Vector3(0, 0, 1), enabled: support.restraints.tz },
+    ];
+    rotationalAxes.forEach(({ axis, enabled }) => {
+      if (!enabled) {
+        return;
+      }
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(0.22, 0.03, 6, 18, Math.PI * 1.5),
+        new THREE.MeshBasicMaterial({ color: supportColor }),
+      );
+      ring.rotation.x = axis.x !== 0 ? Math.PI / 2 : 0;
+      ring.rotation.y = axis.y !== 0 ? Math.PI / 2 : 0;
+      ring.rotation.z = axis.z !== 0 ? Math.PI / 2 : 0;
+      marker.add(ring);
+    });
+    if (marker.children.length === 0) {
+      return;
+    }
+    marker.position.copy(position);
+    assignmentGroup.add(marker);
+  };
+
+  const updateAssignments = (
+    currentElements: StructuralElement1D[],
+    currentMeshElements: readonly StructuralQuadElement2D[],
+    currentNodes: StructuralNode[],
+  ): void => {
+    if (!scene) {
+      return;
+    }
+
+    if (assignmentGroup) {
+      scene.remove(assignmentGroup);
+      assignmentGroup.children.forEach((object) => {
+        if (object instanceof THREE.Mesh || object instanceof THREE.Line || object instanceof THREE.ArrowHelper) {
+          if (object instanceof THREE.Mesh) {
+            object.geometry.dispose();
+            const materials = Array.isArray(object.material) ? object.material : [object.material];
+            materials.forEach((material) => material.dispose());
+          }
+          if (object instanceof THREE.Line) {
+            object.geometry.dispose();
+            const materials = Array.isArray(object.material) ? object.material : [object.material];
+            materials.forEach((material) => material.dispose());
+          }
+        }
+      });
+      assignmentGroup.clear();
+    }
+
+    const activeAssignmentGroup = new THREE.Group();
+    activeAssignmentGroup.name = 'assignment-feedback';
+    assignmentGroup = activeAssignmentGroup;
+
+    const nodesById = new Map(currentNodes.map((node) => [node.id, node]));
+    currentElements.forEach((element) => {
+      const [startNodeId, endNodeId] = element.nodeIds;
+      const startNode = nodesById.get(startNodeId);
+      const endNode = nodesById.get(endNodeId);
+      if (!startNode || !endNode) {
+        return;
+      }
+      const midpoint = new THREE.Vector3(
+        (startNode.position.x + endNode.position.x) / 2,
+        (startNode.position.y + endNode.position.y) / 2,
+        (startNode.position.z + endNode.position.z) / 2,
+      );
+      if (!element.materialId || !element.sectionId) {
+        const statusColor = getElementAssignmentColor(element, 0x22d3ee);
+        const issueMarker = new THREE.Mesh(
+          new THREE.SphereGeometry(0.12, 12, 10),
+          new THREE.MeshBasicMaterial({ color: statusColor }),
+        );
+        issueMarker.position.copy(midpoint);
+        activeAssignmentGroup.add(issueMarker);
+      }
+    });
+
+    currentMeshElements.forEach((element) => {
+      const points = element.nodeIds
+        .map((nodeId) => nodesById.get(nodeId))
+        .filter((node): node is StructuralNode => Boolean(node))
+        .map((node) => new THREE.Vector3(node.position.x, node.position.y, node.position.z));
+      if (points.length < 4) {
+        return;
+      }
+      const centroid = points.reduce(
+        (sum, point) => sum.add(point),
+        new THREE.Vector3(),
+      ).divideScalar(points.length);
+      if (!element.materialId || !element.sectionId) {
+        const statusColor = getElementAssignmentColor(element, 0x34d399);
+        const issueMarker = new THREE.Mesh(
+          new THREE.SphereGeometry(0.13, 12, 10),
+          new THREE.MeshBasicMaterial({ color: statusColor }),
+        );
+        issueMarker.position.copy(centroid);
+        activeAssignmentGroup.add(issueMarker);
+      }
+    });
+
+    nodalLoads.forEach((load) => {
+      const node = nodesById.get(load.nodeId);
+      if (!node) {
+        return;
+      }
+      const origin = new THREE.Vector3(node.position.x, node.position.y, node.position.z);
+      const vector = new THREE.Vector3(load.components.Fx, load.components.Fy, load.components.Fz);
+      const arrow = createVectorArrow(origin, vector, 0xef4444, 0.18);
+      if (arrow) {
+        activeAssignmentGroup.add(arrow);
+      }
+      const momentVector = new THREE.Vector3(load.components.Mx, load.components.My, load.components.Mz);
+      const momentMarker = createMomentMarker(origin.clone().add(new THREE.Vector3(0, 0, 0.4)), momentVector, 0xf97316);
+      if (momentMarker) {
+        activeAssignmentGroup.add(momentMarker);
+      }
+    });
+
+    prescribedDisplacements.forEach((item) => {
+      const node = nodesById.get(item.nodeId);
+      if (!node) {
+        return;
+      }
+      const origin = new THREE.Vector3(node.position.x, node.position.y, node.position.z);
+      const vector = new THREE.Vector3(
+        item.activeDofs.includes('ux') ? item.components.ux : 0,
+        item.activeDofs.includes('uy') ? item.components.uy : 0,
+        item.activeDofs.includes('uz') ? item.components.uz : 0,
+      );
+      const arrow = createVectorArrow(origin, vector, 0x22d3ee, 0.18);
+      if (arrow) {
+        activeAssignmentGroup.add(arrow);
+      }
+      const rotationVector = new THREE.Vector3(
+        item.activeDofs.includes('tx') ? item.components.tx : 0,
+        item.activeDofs.includes('ty') ? item.components.ty : 0,
+        item.activeDofs.includes('tz') ? item.components.tz : 0,
+      );
+      const rotationMarker = createMomentMarker(origin.clone().add(new THREE.Vector3(0, 0, 0.7)), rotationVector, 0x67e8f9);
+      if (rotationMarker) {
+        activeAssignmentGroup.add(rotationMarker);
+      }
+    });
+
+    nodalSupports.forEach((support) => {
+      const node = nodesById.get(support.nodeId);
+      if (!node) {
+        return;
+      }
+      addSupportMarkers(node, support);
+    });
+
+    scene.add(activeAssignmentGroup);
+  };
+
   const updateElements = (
     currentElements: StructuralElement1D[],
     currentMeshElements: readonly StructuralQuadElement2D[],
@@ -373,13 +628,14 @@
         return;
       }
 
+      const defaultColor = element.id === selectionId ? 0xfbbf24 : 0x22d3ee;
       const line = new THREE.Line(
         new THREE.BufferGeometry().setFromPoints([
           new THREE.Vector3(startNode.position.x, startNode.position.y, startNode.position.z),
           new THREE.Vector3(endNode.position.x, endNode.position.y, endNode.position.z),
         ]),
         new THREE.LineBasicMaterial({
-          color: element.id === selectionId ? 0xfbbf24 : 0x22d3ee,
+          color: getElementAssignmentColor(element, defaultColor),
           linewidth: element.id === selectionId ? 3 : 2,
         }),
       );
@@ -398,10 +654,11 @@
       const surfaceGeometry = new THREE.BufferGeometry().setFromPoints(points);
       surfaceGeometry.setIndex([0, 1, 2, 0, 2, 3]);
       surfaceGeometry.computeVertexNormals();
+      const defaultColor = element.id === selectionId ? 0xfbbf24 : 0x34d399;
       const surface = new THREE.Mesh(
         surfaceGeometry,
         new THREE.MeshBasicMaterial({
-          color: element.id === selectionId ? 0xfbbf24 : 0x34d399,
+          color: getElementAssignmentColor(element, defaultColor),
           transparent: true,
           opacity: element.id === selectionId ? 0.32 : 0.16,
           side: THREE.DoubleSide,
@@ -413,7 +670,7 @@
       const outline = new THREE.LineLoop(
         new THREE.BufferGeometry().setFromPoints(points),
         new THREE.LineBasicMaterial({
-          color: element.id === selectionId ? 0xfbbf24 : 0x34d399,
+          color: getElementAssignmentColor(element, defaultColor),
           linewidth: element.id === selectionId ? 3 : 2,
         }),
       );
@@ -774,6 +1031,14 @@
     elementGroup.visible = showOriginalGeometry;
   }
 
+  $: if (assignmentGroup) {
+    assignmentGroup.visible = showOriginalGeometry;
+  }
+
+  $: if (scene && (nodes.length || elements.length || meshElements.length || nodalLoads.length || prescribedDisplacements.length || nodalSupports.length)) {
+    updateAssignments(elements, meshElements, nodes);
+  }
+
   $: if (scene) {
     updateDeformationOverlay(nodes, resultNodes);
   }
@@ -837,6 +1102,13 @@
       <span><i class="axis-x"></i>X</span>
       <span><i class="axis-y"></i>Y</span>
       <span><i class="axis-z"></i>Z</span>
+    </div>
+    <div class="assignment-legend" aria-label="Legenda de atribuições visuais">
+      <span><i class="legend-load"></i>Carga</span>
+      <span><i class="legend-moment"></i>Momento</span>
+      <span><i class="legend-displacement"></i>Desloc.</span>
+      <span><i class="legend-support"></i>Apoio</span>
+      <span><i class="legend-missing"></i>Sem material/seção</span>
     </div>
   {/if}
 </div>
@@ -907,6 +1179,36 @@
     border-radius: 50%;
   }
 
+  .assignment-legend {
+    right: 0.75rem;
+    top: 0.75rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem 0.7rem;
+    max-width: min(20rem, calc(100% - 1.5rem));
+    padding: 0.45rem 0.6rem;
+    background: rgba(2, 8, 23, 0.88);
+    border: 1px solid #334155;
+    border-radius: 0.6rem;
+    color: #cbd5e1;
+    font-size: 0.72rem;
+    pointer-events: none;
+  }
+
+  .assignment-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    white-space: nowrap;
+  }
+
+  .assignment-legend i {
+    width: 0.65rem;
+    height: 0.65rem;
+    border-radius: 0.2rem;
+    display: inline-block;
+  }
+
   .axis-x {
     background: #f87171;
   }
@@ -917,6 +1219,26 @@
 
   .axis-z {
     background: #60a5fa;
+  }
+
+  .legend-load {
+    background: #ef4444;
+  }
+
+  .legend-moment {
+    background: #f97316;
+  }
+
+  .legend-displacement {
+    background: #22d3ee;
+  }
+
+  .legend-support {
+    background: #8b5cf6;
+  }
+
+  .legend-missing {
+    background: #f59e0b;
   }
 
   .viewport-error {
