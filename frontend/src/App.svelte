@@ -1570,7 +1570,7 @@
         resultNodes={deformedResultNodes}
         resultElements={resultElements}
         showDeformedShape={showDeformedShape && importedResults !== undefined}
-        showOriginalGeometry={showOriginalGeometry && importedResults !== undefined}
+        showOriginalGeometry={showOriginalGeometry}
         resultMagnitudeByNode={resultMagnitudeByNode}
         resultColorScaleMax={resultColorScaleMax}
         resultColorMetric={resultDisplayMetric}
