@@ -1035,7 +1035,7 @@
     assignmentGroup.visible = showOriginalGeometry;
   }
 
-  $: if (scene) {
+  $: if (scene && (nodes.length || elements.length || meshElements.length || nodalLoads.length || prescribedDisplacements.length || nodalSupports.length)) {
     updateAssignments(elements, meshElements, nodes);
   }
 
