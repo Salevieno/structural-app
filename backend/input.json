@@ -1,0 +1,72 @@
+{
+  "contractVersion": 1,
+  "analysisId": "analysis-demo-001",
+  "model": {
+    "nodes": [
+      { "id": "N1", "position": { "x": 0, "y": 0, "z": 0 }, "origin": "user" },
+      { "id": "N2", "position": { "x": 10, "y": 0, "z": 0 }, "origin": "user" },
+      { "id": "N3", "position": { "x": 20, "y": 0, "z": 0 }, "origin": "user" },
+      { "id": "N4", "position": { "x": 0, "y": 10, "z": 0 }, "origin": "user" },
+      { "id": "N5", "position": { "x": 10, "y": 10, "z": 0 }, "origin": "user" },
+      { "id": "N6", "position": { "x": 20, "y": 10, "z": 0 }, "origin": "user" },
+      { "id": "N7", "position": { "x": 0, "y": 20, "z": 0 }, "origin": "user" },
+      { "id": "N8", "position": { "x": 10, "y": 20, "z": 0 }, "origin": "user" },
+      { "id": "N9", "position": { "x": 20, "y": 20, "z": 0 }, "origin": "user" }
+    ],
+    "lineElements": [
+      { "type": "line1d", "id": "E1", "nodeIds": ["N1", "N2"] },
+      { "type": "line1d", "id": "E2", "nodeIds": ["N2", "N3"] },
+      { "type": "line1d", "id": "E3", "nodeIds": ["N3", "N6"] },
+      { "type": "line1d", "id": "E4", "nodeIds": ["N6", "N9"] },
+      { "type": "line1d", "id": "E5", "nodeIds": ["N9", "N8"] },
+      { "type": "line1d", "id": "E6", "nodeIds": ["N8", "N7"] },
+      { "type": "line1d", "id": "E7", "nodeIds": ["N7", "N4"] },
+      { "type": "line1d", "id": "E8", "nodeIds": ["N4", "N1"] }
+    ],
+    "mesh": {
+      "id": "MESH_01",
+      "workPlane": "XY",
+      "cellSize": 10,
+      "boundaryNodeIds": ["N1", "N2", "N3", "N4", "N5", "N6", "N7", "N8", "N9"],
+      "generatedNodeIds": [],
+      "elements": [
+        { "type": "quad4", "id": "Q1", "nodeIds": ["N1", "N2", "N5", "N4"] },
+        { "type": "quad4", "id": "Q2", "nodeIds": ["N2", "N3", "N6", "N5"] },
+        { "type": "quad4", "id": "Q3", "nodeIds": ["N4", "N5", "N8", "N7"] },
+        { "type": "quad4", "id": "Q4", "nodeIds": ["N5", "N6", "N9", "N8"] }
+      ],
+      "polygonArea": 400,
+      "meshedArea": 400,
+      "omittedArea": 0
+    },
+    "materials": [
+      {
+        "id": "MAT_STEEL",
+        "name": "Aço",
+        "elasticModulusGPa": 200,
+        "poissonRatio": 0.3,
+        "shearModulusGPa": 80
+      }
+    ],
+    "sections": [
+      { "id": "SEC_100", "name": "Seção 100", "thicknessMm": 100 }
+    ],
+    "nodalLoads": [
+      { "nodeId": "N5", "components": { "Fx": 0, "Fy": -50, "Fz": 0, "Mx": 0, "My": 0, "Mz": 0 } }
+    ],
+    "prescribedDisplacements": [
+      {
+        "nodeId": "N1",
+        "components": { "ux": 0, "uy": 0, "uz": 0, "tx": 0, "ty": 0, "tz": 0 },
+        "activeDofs": ["ux", "uy"]
+      }
+    ],
+    "nodalSupports": [
+      {
+        "nodeId": "N1",
+        "restraints": { "ux": true, "uy": true, "uz": false, "tx": false, "ty": false, "tz": false }
+      }
+    ],
+    "activeWorkPlane": "XY"
+  }
+}
