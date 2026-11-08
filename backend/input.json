@@ -1,11 +1,6 @@
 {
-  "schema": "structural-model",
-  "version": 1,
-  "projectId": "proj-001",
-  "requestId": "req-001",
-  "name": "Viga de piso",
-  "generatedAt": "2026-11-06T12:00:00.000Z",
-  "activeWorkPlane": "XY",
+  "contractVersion": 1,
+  "analysisId": "analysis-demo-001",
   "model": {
     "nodes": [
       { "id": "N1", "position": { "x": 0, "y": 0, "z": 0 }, "origin": "user" },
@@ -31,7 +26,7 @@
     "mesh": {
       "id": "MESH_01",
       "workPlane": "XY",
-      "cellSize": 250,
+      "cellSize": 10,
       "boundaryNodeIds": ["N1", "N2", "N3", "N4", "N5", "N6", "N7", "N8", "N9"],
       "generatedNodeIds": [],
       "elements": [
@@ -71,6 +66,7 @@
         "nodeId": "N1",
         "restraints": { "ux": true, "uy": true, "uz": false, "tx": false, "ty": false, "tz": false }
       }
-    ]
+    ],
+    "activeWorkPlane": "XY"
   }
 }
