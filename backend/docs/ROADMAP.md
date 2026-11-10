@@ -5,7 +5,7 @@ Implemente e valide uma etapa antes da próxima. Não avance sem autorização.
 ## Etapa 0 — Fundação
 Inspecionar `Cargo.toml`/`main.rs`; separar biblioteca do host desktop; usar `structure.rs`; manter formatação, check e testes Rust sem depender da interface.
 
-**Aceite:** biblioteca compila e o host Tauri a utiliza; sem FEM fictício.
+**Aceite:** biblioteca compila e o host Tauri a utiliza; resultados mock, quando usados para integração, são identificados como não sendo uma análise FEM real.
 
 ## Etapa 1 — Contrato e protocolo
 Implementar envelope camelCase, versão, requestId, operation, payload, resposta success/error, fixtures e testes round-trip. Rejeitar versão/operação desconhecida.
@@ -45,7 +45,7 @@ Implementar somente cargas com unidades/direções/distribuição definidas. Res
 ## Etapa 8 — Tauri
 Configurar o host Tauri 2; registrar comandos finos de diagnóstico/análise; tratar erros IPC; progresso/cancelamento somente se suportados ponta a ponta. A análise deve permanecer sem resultados até que o solver real seja implementado.
 
-**Aceite de integração:** o front-end verifica o diagnóstico via IPC; `run_analysis` recebe a solicitação e nunca devolve resultados fictícios. A análise real depende das etapas 1–7 e não foi iniciada nesta integração.
+**Aceite de integração:** o front-end verifica o diagnóstico via IPC; `run_analysis` valida a solicitação e pode devolver o fixture de resultados para validar a integração da interface. O solver real depende das etapas 1–7 e não foi iniciado nesta integração.
 
 ## Etapa 9 — Expansão
 Planejar vigas, outros elementos, ordem superior e não linearidade. Criar abstrações apenas quando casos reais justificarem.

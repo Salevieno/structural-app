@@ -38,4 +38,4 @@ Usar armazenamento esparso na produção. Matriz densa pode ser usada em testes 
 Abstração recebe sistema pronto e retorna solução/erro. A expectativa de K simétrica positiva definida vale somente quando hipóteses e restrições garantem isso. Mecanismos, apoios insuficientes e não linearidade podem produzir sistema singular/indefinido.
 
 ## Tauri
-Tauri 2 inicia a aplicação desktop e registra `backend_diagnostic` e `run_analysis` na biblioteca. O diagnóstico retorna um marcador verificável; `run_analysis` valida a versão/ID da solicitação e, enquanto não houver solver, retorna erro explícito. Nenhuma formulação FEM ou resultado presumido pode ser criado no comando.
+Tauri 2 inicia a aplicação desktop e registra `backend_diagnostic` e `run_analysis` na biblioteca. O diagnóstico retorna um marcador verificável. Enquanto o solver não estiver implementado, `run_analysis` valida a versão, o ID e os nós da solicitação e retorna o fixture `frontend/docs/structural-results-example.json`, adaptando os IDs e posições dos nós ao modelo enviado. Esses valores são mock para integração de interface e não representam uma análise FEM.

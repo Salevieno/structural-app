@@ -26,7 +26,7 @@ O backend deve funcionar e ser testável sem abrir a interface. A lógica FEM n�
 10. Resolver o sistema e recuperar resultados.
 11. Devolver resposta JSON estruturada, com sucesso ou diagnóstico de erro.
 
-O backend não desenha a estrutura, não implementa regras de interação visual, não inventa unidades/formulações e não pode retornar números fictícios como análise real.
+O backend não desenha a estrutura, não implementa regras de interação visual e não inventa unidades/formulações. Enquanto o solver não estiver implementado, `run_analysis` devolve um mock do fixture de resultados para validar a integração do front-end; esses valores não são uma análise real.
 
 ## Domínio e elementos iniciais
 
@@ -97,4 +97,4 @@ Leia este README e todos os documentos em `docs/`. Inspecione o código existent
 
 ## Integração atual
 
-O executável inicia a aplicação Tauri 2; `lib.rs` registra os comandos IPC. O protótipo CLI anterior foi removido porque gerava resultados hardcoded que poderiam ser confundidos com uma análise real. O solver ainda não está implementado: `run_analysis` retorna erro explícito, e os testes Rust verificam essa condição.
+O executável inicia a aplicação Tauri 2; `lib.rs` registra os comandos IPC. O protótipo CLI anterior foi removido. Para a integração atual, `run_analysis` devolve um mock baseado em `frontend/docs/structural-results-example.json` e adapta os IDs/posições dos nós à solicitação. O resultado serve apenas para validar o fluxo do front-end e não é calculado pelo solver, que ainda não está implementado.
