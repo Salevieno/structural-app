@@ -83,16 +83,15 @@ Implemente e valide uma etapa por vez. Não implemente toda a aplicação em uma
 **Aceite:** contorno válido gera quadriláteros de 4 nós com conectividade e orientação consistentes; casos inválidos ou sem células geram diagnóstico claro; elementos 1D continuam distintos; graus de liberdade e atribuições são validados centralmente; `npm run check`, build e testes relevantes passam.
 
 ## Etapa 8 — Contrato de análise e integração Tauri
-- Definir contrato versionado `AnalysisRequest` para o snapshot provisório do modelo e contrato de eventos terminais/progresso correlacionados por `analysisId`.
-- Comandos Tauri: `analysis_start` recebe `{ request }` e retorna `{ analysisId }` após aceitar o trabalho; `analysis_cancel` recebe `{ analysisId }` e solicita cancelamento cooperativo.
-- Eventos Tauri: `analysis://progress` (`analysisId`, progresso 0–100, mensagem), `analysis://completed` (`analysisId`, horário), `analysis://failed` (`analysisId`, código, mensagem) e `analysis://cancelled` (`analysisId`, horário).
-- Criar `AnalysisService` com implementação simulada e implementação Tauri isoladas; fora do runtime Tauri, usar o serviço simulado.
-- Tratar progresso, cancelamento cooperativo, sucesso e falha. A conclusão simulada deve dizer claramente que nenhum cálculo estrutural foi executado.
+- Configurar Tauri 2, caminhos de build/dev do Vite e capability da janela principal.
+- Expor `backend_diagnostic` e `run_analysis` como comandos IPC registrados.
+- Chamar os comandos por serviços TypeScript, verificar o marcador de diagnóstico e validar resultados antes de atualizar a interface.
+- Mostrar falhas de transporte/processamento sem converter respostas inválidas em sucesso; não usar análise simulada como resultado estrutural.
 - Não espalhar chamadas Tauri pelos componentes.
 
-**Limitação desta etapa:** o backend Rust ainda não fornece os comandos/eventos; sua implementação precisa cumprir o contrato acima. O snapshot e seus tipos são provisórios e não definem o contrato final de engenharia nem resultados numéricos.
+**Limitação desta etapa:** o solver estrutural ainda não está implementado. `run_analysis` devolve um erro explícito e não produz resultados. Progresso e cancelamento ficam indisponíveis até serem suportados pelo backend. O snapshot e os tipos de modelo continuam provisórios.
 
-**Aceite:** UI funciona com serviço simulado e feedback de progresso/cancelamento/falha; adaptador Tauri isolado implementa o contrato; nenhuma conclusão simulada é apresentada como resultado estrutural real.
+**Aceite:** diagnóstico real via Tauri confirma a conectividade; adaptador invoca `run_analysis` e valida o documento de resultados; nenhuma conclusão simulada é apresentada como resultado estrutural real.
 
 ## Etapa 9 — Importação e validação de resultados
 - Implementar seleção/leitura de arquivo.
@@ -122,11 +121,11 @@ Implemente e valide uma etapa por vez. Não implemente toda a aplicação em uma
 **Aceite:** cada tipo de atribuição pode ser identificado na viewport e/ou legenda; a visualização acompanha alterações no modelo; logs não são gerados continuamente durante a renderização.
 
 ## Etapa 12 — Empacotamento desktop
-- Adicionar Tauri.
-- Conectar os serviços ao backend Rust.
-- Configurar build e empacotamento para Windows primeiro, expandindo depois conforme necessidade.
+- O host Tauri 2, os comandos IPC e os caminhos frontend/backend já estão configurados na Etapa 8.
+- Finalizar/validar os formatos de empacotamento para Windows primeiro, expandindo depois conforme necessidade.
+- Documentar pré-requisitos nativos e distribuição.
 
-**Aceite:** aplicativo desktop inicia; erros de integração são logados; instruções de build estão documentadas.
+**Aceite:** instalador desktop para a plataforma alvo é gerado; erros de integração são logados; instruções de build estão documentadas.
 
 ## Regra de conclusão de cada etapa
 

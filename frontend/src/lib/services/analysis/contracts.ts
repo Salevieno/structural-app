@@ -12,20 +12,16 @@ import type {
   StructuralSection,
 } from '../../domain/model';
 import type { WorkPlane } from '../../viewport/workPlane';
+import type { StructuralResultsDocument } from '../resultsImport';
 
 export const ANALYSIS_CONTRACT_VERSION = 1;
 
 export const ANALYSIS_COMMANDS = {
-  start: 'analysis_start',
-  cancel: 'analysis_cancel',
+  run: 'run_analysis',
 } as const;
 
-export const ANALYSIS_EVENTS = {
-  progress: 'analysis://progress',
-  completed: 'analysis://completed',
-  failed: 'analysis://failed',
-  cancelled: 'analysis://cancelled',
-} as const;
+export const BACKEND_DIAGNOSTIC_COMMAND = 'backend_diagnostic';
+export const BACKEND_DIAGNOSTIC_RESPONSE = 'structural-app-backend-ready';
 
 export interface AnalysisModelSnapshot {
   nodes: readonly StructuralNode[];
@@ -45,68 +41,27 @@ export interface AnalysisRequest {
   model: AnalysisModelSnapshot;
 }
 
-export interface AnalysisAccepted {
-  analysisId: string;
-}
-
-export interface AnalysisProgressEvent {
-  analysisId: string;
-  progress: number;
-  message: string;
-}
-
-export interface AnalysisCompletedEvent {
-  analysisId: string;
-  completedAt: string;
-}
-
-export interface AnalysisFailedEvent {
-  analysisId: string;
-  code: string;
-  message: string;
-}
-
-export interface AnalysisCancelledEvent {
-  analysisId: string;
-  cancelledAt: string;
-}
-
-export type AnalysisEvent =
-  | ({ type: 'progress' } & AnalysisProgressEvent)
-  | ({ type: 'completed' } & AnalysisCompletedEvent)
-  | ({ type: 'failed' } & AnalysisFailedEvent)
-  | ({ type: 'cancelled' } & AnalysisCancelledEvent);
-
 export type AnalysisOutcome =
-  | {
-      analysisId: string;
-      status: 'completed';
-      completedAt: string;
-      simulated: boolean;
-    }
-  | {
-      analysisId: string;
-      status: 'cancelled';
-      cancelledAt: string;
-      simulated: boolean;
-    };
+  {
+    analysisId: string;
+    status: 'completed';
+    completedAt: string;
+    simulated: false;
+    results: StructuralResultsDocument;
+  };
 
 export interface AnalysisService {
-  readonly implementation: 'mock' | 'tauri';
-  readonly supportsCancellation: boolean;
-  start(request: AnalysisRequest, onEvent: (event: AnalysisEvent) => void): Promise<AnalysisOutcome>;
-  cancel(analysisId: string): Promise<void>;
+  readonly implementation: 'tauri';
+  start(request: AnalysisRequest): Promise<AnalysisOutcome>;
 }
 
 export interface AnalysisTauriTransport {
   invoke<T>(command: string, args: Record<string, unknown>): Promise<T>;
-  listen<T>(event: string, handler: (payload: T) => void): Promise<() => void>;
 }
 
 export interface AnalysisUiState {
   analysisId: string;
-  status: 'running' | 'cancelling' | 'completed' | 'cancelled' | 'failed';
-  progress: number;
+  status: 'running' | 'completed' | 'failed';
   message: string;
 }
 

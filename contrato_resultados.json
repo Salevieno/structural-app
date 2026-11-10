@@ -1,0 +1,33 @@
+{
+  "schema": "",
+  "version": 0,
+  "projectId": "",
+  "analysisId": "",
+  "status": "",
+  "generatedAt": "YYYY-MM-DDTHH:MM:SS.000Z",
+  "summary": {
+    "maxDisplacementMm": 0.0,
+    "maxRotationRad": 0.0,
+    "reactionCount": 0
+  },
+  "nodes": [
+    { "nodeId": "", "position": { "x": 0.0, "y": 0.0, "z": 0.0 } }
+  ],
+  "displacements": [
+    { "nodeId": "", "uxMm": 0.0, "uyMm": 0.0, "uzMm": 0.0, "txRad": 0.0, "tyRad": 0.0, "tzRad": 0.0 }
+  ],
+  "reactions": [
+    {
+      "nodeId": "",
+      "Fx_kN": 0.0,
+      "Fy_kN": 0.0,
+      "Fz_kN": 0.0,
+      "Mx_kNm": 0.0,
+      "My_kNm": 0.0,
+      "Mz_kNm": 0.0
+    }
+  ],
+  "elements": [
+    { "elementId": "", "nodeIds": ["", ""], "type": "", "normalForce_kN": 0.0, "shearForceY_kN": 0.0, "bendingMoment_kNm": 0.0 }
+  ]
+}

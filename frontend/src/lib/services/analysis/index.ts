@@ -1,26 +1,35 @@
-import { createMockAnalysisService } from './mockAnalysisService.ts';
 import { createTauriAnalysisService } from './tauriAnalysisService.ts';
-import type { AnalysisService, AnalysisTauriTransport } from './contracts.ts';
+import {
+  BACKEND_DIAGNOSTIC_RESPONSE,
+  type AnalysisService,
+  type AnalysisTauriTransport,
+} from './contracts.ts';
+import { createTauriIntegrationService } from '../tauri/integrationService.ts';
 
 export * from './contracts.ts';
-export { createMockAnalysisService } from './mockAnalysisService.ts';
 export { createTauriAnalysisService } from './tauriAnalysisService.ts';
 
-export const createDefaultAnalysisService = async (): Promise<AnalysisService> => {
+export interface AnalysisServices {
+  analysisService: AnalysisService;
+  diagnosticResult: string;
+}
+
+export const createDefaultAnalysisService = async (): Promise<AnalysisServices> => {
   const tauriCore = await import('@tauri-apps/api/core');
   if (!tauriCore.isTauri()) {
-    return createMockAnalysisService();
+    throw new Error('A análise estrutural só está disponível no aplicativo Tauri.');
   }
 
-  const tauriEvents = await import('@tauri-apps/api/event');
   const transport: AnalysisTauriTransport = {
     invoke: (command, args) => tauriCore.invoke(command, args),
-    listen: async <T,>(event: string, handler: (payload: T) => void) => {
-      const unlisten = await tauriEvents.listen<T>(event, ({ payload }) => handler(payload));
-      return () => {
-        unlisten();
-      };
-    },
   };
-  return createTauriAnalysisService(transport);
+  const diagnosticResult = await createTauriIntegrationService(transport).diagnose();
+  if (diagnosticResult !== BACKEND_DIAGNOSTIC_RESPONSE) {
+    throw new Error('O backend respondeu um identificador inesperado ao teste de diagnóstico.');
+  }
+
+  return {
+    analysisService: createTauriAnalysisService(transport),
+    diagnosticResult,
+  };
 };

@@ -10,7 +10,7 @@ Ordem de autoridade: decisões confirmadas pelo usuário; `DATA_CONTRACTS.md` pa
 - `serde` com `derive` e `serde_json` para protocolo.
 - `thiserror` ou mecanismo equivalente para erros tipados.
 - Biblioteca numérica escolhida e versionada em `DECISIONS.md`, após verificar suporte real a matrizes esparsas/fatoração, compatibilidade e licença.
-- `lib.rs` contém domínio/serviços; `main.rs` é adaptador CLI temporário.
+- `lib.rs` contém a API e os comandos finos Tauri; `main.rs` inicia o aplicativo desktop.
 - Tipos de domínio não dependem de JSON. DTOs de protocolo são convertidos explicitamente para domínio.
 - IDs são estáveis e não dependem da posição em vetores.
 - Validar `is_finite()` para coordenadas, propriedades, cargas, deslocamentos e resultados.

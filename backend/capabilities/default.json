@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Permite que a janela principal use os comandos essenciais do Tauri.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

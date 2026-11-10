@@ -95,6 +95,6 @@ Não crie arquivos vazios para antecipar arquitetura. Quando um módulo crescer,
 
 Leia este README e todos os documentos em `docs/`. Inspecione o código existente antes de alterar. Implemente somente a próxima etapa não concluída do ROADMAP. Se faltar uma decisão de engenharia necessária, pare e pergunte; não improvise. Ao terminar, informe arquivos alterados, comandos, testes, limitações e confirme que não começou a etapa seguinte.
 
-## Estado inicial
+## Integração atual
 
-Já existiu um protótipo CLI que lê JSON por stdin e escreve resposta por stdout com `serde`/`serde_json`. Ele comprovou a comunicação básica, mas não é o contrato definitivo nem deve conter lógica FEM. Preserve-o como adaptador temporário se ainda funcionar; mova o domínio para `lib.rs`.
+O executável inicia a aplicação Tauri 2; `lib.rs` registra os comandos IPC. O protótipo CLI anterior foi removido porque gerava resultados hardcoded que poderiam ser confundidos com uma análise real. O solver ainda não está implementado: `run_analysis` retorna erro explícito, e os testes Rust verificam essa condição.

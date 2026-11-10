@@ -33,8 +33,6 @@
   import {
     createAnalysisRequest,
     createDefaultAnalysisService,
-    createMockAnalysisService,
-    type AnalysisEvent,
     type AnalysisService,
     type AnalysisUiState,
   } from './lib/services/analysis';
@@ -170,9 +168,10 @@
   let contourNodes: StructuralNode[] = [];
   let meshIsCurrent = false;
   let meshGenerationBlockReason: string | undefined;
-  let analysisService: AnalysisService = createMockAnalysisService();
+  let analysisService: AnalysisService | undefined;
   let analysisServiceReady = false;
   let analysisServiceError = '';
+  let backendDiagnosticResult = '';
   let analysisUiState: AnalysisUiState | undefined;
   let modelImportService = createModelImportService();
   let resultsImportService = createResultsImportService();
@@ -491,20 +490,9 @@
     }
   };
 
-  const handleAnalysisEvent = (event: AnalysisEvent): void => {
-    if (event.type === 'progress' && analysisUiState?.analysisId === event.analysisId) {
-      analysisUiState = {
-        ...analysisUiState,
-        progress: event.progress,
-        message: event.message,
-      };
-    }
-  };
-
   const startAnalysis = async (): Promise<void> => {
-    const analysisInProgress =
-      analysisUiState?.status === 'running' || analysisUiState?.status === 'cancelling';
-    if (!analysisReadiness.ready || !meshIsCurrent || !mesh || !analysisServiceReady || analysisInProgress) {
+    const analysisInProgress = analysisUiState?.status === 'running';
+    if (!analysisReadiness.ready || !meshIsCurrent || !mesh || !analysisServiceReady || !analysisService || analysisInProgress) {
       return;
     }
 
@@ -526,8 +514,7 @@
     analysisUiState = {
       analysisId,
       status: 'running',
-      progress: 0,
-      message: 'Solicitando análise...',
+      message: 'Enviando o modelo ao backend...',
     };
     logger.info('analysis.start.requested', 'Análise solicitada', {
       analysisId,
@@ -538,57 +525,34 @@
     });
 
     try {
-      const outcome = await analysisService.start(request, handleAnalysisEvent);
-      analysisUiState = outcome.status === 'completed'
-        ? {
-            analysisId,
-            status: 'completed',
-            progress: 100,
-            message: outcome.simulated
-              ? 'Fluxo simulado concluído; nenhum cálculo estrutural foi executado.'
-              : 'Análise concluída pelo backend.',
-          }
-        : {
-            analysisId,
-            status: 'cancelled',
-            progress: analysisUiState?.progress ?? 0,
-            message: 'Análise cancelada.',
-          };
-      logger.info(
-        outcome.status === 'completed' ? 'analysis.completed' : 'analysis.cancelled',
-        outcome.status === 'completed' ? 'Fluxo de análise concluído' : 'Análise cancelada',
-        { analysisId, simulated: outcome.simulated },
-      );
+      const outcome = await analysisService.start(request);
+      importedResults = outcome.results;
+      analysisUiState = {
+        analysisId,
+        status: 'completed',
+        message: 'Análise concluída pelo backend.',
+      };
+      logger.info('analysis.completed', 'Análise concluída pelo backend', {
+        analysisId,
+        nodeCount: outcome.results.nodes.length,
+        elementCount: outcome.results.elements?.length ?? 0,
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      analysisUiState = { analysisId, status: 'failed', progress: 0, message: `Falha na análise: ${message}` };
+      analysisUiState = { analysisId, status: 'failed', message: `Falha na análise: ${message}` };
       logger.error('analysis.failed', 'Falha ao iniciar ou executar a análise', { analysisId }, error instanceof Error ? error : new Error(message));
-    }
-  };
-
-  const cancelAnalysis = async (): Promise<void> => {
-    if (analysisUiState?.status !== 'running' || !analysisService.supportsCancellation) {
-      return;
-    }
-
-    const { analysisId } = analysisUiState;
-    analysisUiState = { ...analysisUiState, status: 'cancelling', message: 'Solicitando cancelamento...' };
-    try {
-      await analysisService.cancel(analysisId);
-      logger.info('analysis.cancel.requested', 'Cancelamento da análise solicitado', { analysisId });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      analysisUiState = { analysisId, status: 'running', progress: analysisUiState.progress, message: `Não foi possível cancelar: ${message}` };
-      logger.error('analysis.cancel.failed', 'Falha ao solicitar cancelamento', { analysisId }, error instanceof Error ? error : new Error(message));
     }
   };
 
   const initializeAnalysisService = async (): Promise<void> => {
     try {
-      analysisService = await createDefaultAnalysisService();
+      const services = await createDefaultAnalysisService();
+      analysisService = services.analysisService;
+      backendDiagnosticResult = services.diagnosticResult;
       analysisServiceReady = true;
       logger.info('analysis.service.ready', 'Serviço de análise preparado', {
         implementation: analysisService.implementation,
+        diagnosticResult: backendDiagnosticResult,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1443,12 +1407,12 @@
         <button type="button">Editar</button>
         <button
           type="button"
-          disabled={!analysisReadiness.ready || !analysisServiceReady || analysisUiState?.status === 'running' || analysisUiState?.status === 'cancelling'}
+          disabled={!analysisReadiness.ready || !analysisServiceReady || analysisUiState?.status === 'running'}
           on:click={startAnalysis}
           aria-describedby="analysis-readiness-status analysis-readiness-issues"
           title={!analysisReadiness.ready ? 'Consulte os problemas de prontidão do modelo' : !analysisServiceReady ? 'Aguarde a inicialização do serviço de análise' : 'Iniciar análise'}
         >
-          {analysisUiState?.status === 'running' || analysisUiState?.status === 'cancelling' ? 'Análise em andamento' : 'Iniciar análise'}
+          {analysisUiState?.status === 'running' ? 'Análise em andamento' : 'Iniciar análise'}
         </button>
       {/if}
     </nav>
@@ -1639,21 +1603,16 @@
               <li>Todos os requisitos mínimos de completude foram atendidos.</li>
             {/if}
           </ul>
+          {#if backendDiagnosticResult}
+            <p class="analysis-message" role="status">
+              Conexão Tauri confirmada: {backendDiagnosticResult}
+            </p>
+          {/if}
           {#if analysisServiceError}
             <p class="analysis-message analysis-failed" role="alert">{analysisServiceError}</p>
           {:else if analysisUiState}
             <div class="analysis-message" role="status" aria-live="polite" aria-atomic="true">
               <p>{analysisUiState.message}</p>
-              {#if analysisUiState.status === 'running' || analysisUiState.status === 'cancelling'}
-                <progress max="100" value={analysisUiState.progress} aria-label="Progresso da análise">
-                  {analysisUiState.progress}%
-                </progress>
-                {#if analysisService.supportsCancellation}
-                  <button type="button" disabled={analysisUiState.status === 'cancelling'} on:click={cancelAnalysis}>
-                    {analysisUiState.status === 'cancelling' ? 'Cancelando…' : 'Cancelar análise'}
-                  </button>
-                {/if}
-              {/if}
             </div>
           {/if}
         </section>

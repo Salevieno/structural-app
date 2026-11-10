@@ -9,7 +9,9 @@ Uma única aplicação desktop, com tecnologias diferentes em camadas:
 - Rust: domínio estrutural, orquestração da análise e integração com o solver.
 - CHOLMOD: resolução de sistemas lineares esparsos, chamado pelo backend Rust.
 
-O front-end pode ser desenvolvido primeiro com serviços simulados, mantendo a futura integração isolada.
+O front-end comunica com o backend por serviços Tauri; a análise não usa fallback simulado. No navegador, sem runtime Tauri, a análise permanece indisponível.
+
+Comandos de desenvolvimento: `npm run dev`/`npm run build` para o Vite e `npm run tauri -- dev` para iniciar a aplicação desktop Tauri 2. A configuração desktop fica em `../backend/tauri.conf.json`.
 
 ## 2. Organização sugerida do front-end
 ```
@@ -63,7 +65,7 @@ A estrutura é uma orientação, não uma exigência de criar todos os diretóri
 ## 4. Dependências e fronteiras
 
 - Componentes dependem de serviços/estado e tipos de domínio, não de implementações nativas Tauri diretamente.
-- Serviços definem interfaces claras; a implementação simulada pode ser trocada por uma implementação Tauri.
+- Serviços encapsulam o IPC e validam as respostas do backend; não há fallback simulado para análise.
 - O viewport recebe dados de modelo e seleção e emite intenções/eventos; não deve ser dono da verdade do modelo.
 - Validação não deve depender de componentes Svelte.
 - Logging deve ser chamado por serviços e fluxos de domínio, com componentes registrando apenas eventos de interação úteis.
@@ -83,7 +85,7 @@ Os contratos de modelo e resultados continuam provisórios. O contrato de transp
 
 ### Etapa 8 — análise
 
-O serviço e seus adaptadores ficam em `src/lib/services/analysis/`. No navegador, a aplicação usa um serviço simulado com progresso, cancelamento e indicação explícita de que nenhum cálculo estrutural foi executado. No runtime Tauri, o adaptador usa `analysis_start`/`analysis_cancel` e os eventos `analysis://progress`, `analysis://completed`, `analysis://failed` e `analysis://cancelled`, correlacionados por `analysisId`. O backend Rust ainda não implementa esses handlers.
+O serviço Tauri fica em `src/lib/services/analysis/`; `src/lib/services/tauri/` encapsula o diagnóstico IPC. A inicialização valida a resposta do comando `backend_diagnostic`. A análise chama `run_analysis` e valida o documento de resultados; o backend atual ainda não contém solver e retorna uma falha explícita, sem apresentar dados fictícios. Progresso e cancelamento não são exibidos porque o backend não os suporta.
 
 ## 6. Estado da aplicação
 
