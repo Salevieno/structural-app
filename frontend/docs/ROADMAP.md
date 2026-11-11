@@ -11,7 +11,7 @@ Leia o `README.md` e os documentos em `docs/` antes de implementar funcionalidad
 - Ative TypeScript estrito. Evite `any`; se precisar representar algo ainda indefinido, use `unknown` e valide explicitamente.
 - Não invente os modelos definitivos da estrutura, dos elementos, dos materiais, das seções ou dos resultados. Use tipos provisórios isolados em `src/lib/domain/` e marque-os como provisórios até o usuário fornecer os contratos.
 - Não implementar cálculo estrutural/solver no navegador. O front-end modela, valida o básico de interface e apresenta dados; o backend Rust será responsável pela análise.
-- A integração com Tauri deve ficar atrás de uma interface/serviço, nunca espalhada por componentes. Enquanto o backend não existir, use uma implementação simulada claramente identificada.
+- A integração com Tauri deve ficar atrás de uma interface/serviço, nunca espalhada por componentes. Sem solver no backend, a análise precisa terminar com erro explícito e não usar resultados simulados.
 - Nunca fingir que uma análise, importação ou gravação foi concluída. Diferencie estados `idle`, `running`, `success` e `error` quando aplicável.
 - Valide resultados recebidos antes de exibi-los. No mínimo, conferir se a quantidade de nós dos resultados corresponde à quantidade de nós do modelo; trate também arquivos inválidos, dados ausentes e erros de leitura.
 - Centralize o logging e use níveis `debug`, `info`, `warn` e `error`. Logs devem incluir contexto útil e não conter dumps enormes de matrizes ou dados sensíveis.

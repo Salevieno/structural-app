@@ -14,7 +14,7 @@
 **Decisão:** não adicionar banco de dados nem servidor remoto sem uma necessidade concreta. Arquivos locais serão considerados para projetos/resultados quando seus formatos forem definidos.
 
 ## D-004 — Serviços desacoplados da tecnologia de comunicação
-**Decisão:** os componentes usam interfaces de serviço. A implementação simulada é usada no desenvolvimento inicial; a implementação Tauri será adicionada depois.
+**Decisão:** os componentes usam interfaces de serviço; a análise no aplicativo desktop usa Tauri IPC. Um modo simulado não pode produzir um resultado que pareça análise estrutural concluída.
 
 ## D-005 — Contratos de engenharia não presumidos
 **Decisão:** os formatos definitivos de modelo, DOFs, materiais, seções, cargas, apoios e resultados serão definidos pelo usuário. O front-end não deve fixar prematuramente unidades, sinais ou formulações.

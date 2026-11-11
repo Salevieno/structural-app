@@ -2,7 +2,7 @@
 
 ## 1. Objetivo
 
-Criar uma interface desktop para construir um modelo estrutural 3D, preparar uma análise, receber resultados do backend ou de arquivo e visualizar esses resultados. O front-end será implementado primeiro com dados simulados, sem fingir que existe um solver funcional.
+Criar uma interface desktop para construir um modelo estrutural 3D, preparar uma análise, receber resultados do backend ou de arquivo e visualizar esses resultados. A interface usa IPC Tauri para análise; enquanto não houver solver Rust, a aplicação informa falha e não inventa resultados.
 
 ## 2. Layout conceitual
 
@@ -100,7 +100,7 @@ Ao iniciar:
 7. registrar sucesso, cancelamento ou falha com contexto;
 8. não descartar o modelo em caso de erro.
 
-O contrato versionado, os comandos/eventos Tauri e as implementações isoladas `AnalysisService` estão em `src/lib/services/analysis/`. O modo web usa serviço simulado, com aviso de que não executa cálculo estrutural. O backend atual (`backend/src/main.rs`) ainda não contém handlers Tauri; portanto a implementação nativa espera os comandos/eventos definidos em `FRONTEND_SPEC.md`. Nenhum resultado FEM é produzido nesta etapa.
+O `AnalysisService` chama `run_analysis` através do Tauri IPC; antes de habilitar o serviço, a aplicação chama `backend_diagnostic` e confere o marcador retornado. O backend ainda não implementa o solver estrutural: a chamada de análise retorna erro explícito e nenhum resultado fictício é exibido. Operações de análise não estão disponíveis no modo navegador.
 
 ## 6. Receber resultados
 

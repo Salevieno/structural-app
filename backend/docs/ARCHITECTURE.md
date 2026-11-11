@@ -2,16 +2,11 @@
 
 ## Fluxo
 ```text
-JSON / Tauri IPC / CLI
-        -> protocol (DTO e versão)
-        -> conversão e validação
-        -> structure (domínio)
-        -> analysis (orquestração)
-             -> elements (contribuições elementares)
-             -> assembly (DOF map, K e F globais)
-             -> solver (sistema numérico)
-        -> results
-        -> protocol response
+Tauri IPC
+    -> commands (diagnóstico / análise)
+    -> biblioteca Rust
+    -> análise e solver (a implementar)
+    -> resultados
 ```
 
 ## Dependências
@@ -22,7 +17,7 @@ JSON / Tauri IPC / CLI
 - `solver`: recebe matrizes/vetores; não conhece elementos.
 - `analysis`: coordena os serviços.
 - `error`: erros compartilhados.
-- `main`: adaptador CLI temporário.
+- `main`: entrada do aplicativo Tauri.
 - `lib`: API pública.
 
 Evitar ciclos. Mover tipos compartilhados para o módulo que conceitualmente os possui.
@@ -43,4 +38,4 @@ Usar armazenamento esparso na produção. Matriz densa pode ser usada em testes 
 Abstração recebe sistema pronto e retorna solução/erro. A expectativa de K simétrica positiva definida vale somente quando hipóteses e restrições garantem isso. Mecanismos, apoios insuficientes e não linearidade podem produzir sistema singular/indefinido.
 
 ## Tauri
-Comandos Tauri devem ser finos: receber DTO, chamar biblioteca e devolver resposta. CLI continua disponível para testes. Nenhuma formulação FEM dentro de comandos Tauri.
+Tauri 2 inicia a aplicação desktop e registra `backend_diagnostic` e `run_analysis` na biblioteca. O diagnóstico retorna um marcador verificável. Enquanto o solver não estiver implementado, `run_analysis` valida a versão, o ID e os nós da solicitação e retorna o fixture `frontend/docs/structural-results-example.json`, adaptando os IDs e posições dos nós ao modelo enviado. Esses valores são mock para integração de interface e não representam uma análise FEM.
